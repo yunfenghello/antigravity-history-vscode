@@ -745,11 +745,15 @@ async function handleExportPlanSingle(planId: string, fileName?: string): Promis
   }
 
   const cleanTitle = safeFilename(plan.title);
-  let defaultSaveName = `${cleanTitle}.md`;
+  let defaultSaveName = `${cleanTitle}_实施方案.md`;
   if (targetFileName === 'task.md') {
     defaultSaveName = `${cleanTitle}_任务清单.md`;
   } else if (targetFileName === 'walkthrough.md') {
     defaultSaveName = `${cleanTitle}_变更报告.md`;
+  } else if (targetFileName === 'implementation_plan.md') {
+    defaultSaveName = `${cleanTitle}_实施方案.md`;
+  } else {
+    defaultSaveName = `${cleanTitle}_${targetFileName}`;
   }
 
   const defaultUri = vscode.Uri.file(path.join(defaultDir, defaultSaveName));

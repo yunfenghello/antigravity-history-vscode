@@ -2,6 +2,15 @@
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
 
+## [0.3.1] - 2026-11-03
+
+### Added
+- **工件标签升级为交互式单件下载按钮**：
+  - 将卡片底部的【实施方案 (implementation_plan.md)】、【任务清单 (task.md)】、【变更报告 (walkthrough.md)】及其他参考文档全量升级为可点击的交互胶囊。
+  - 点击任意文档标签即可直接弹出系统另存为对话框，精准单独保存对应工件，无需打包全部文件。
+  - 单件保存时自动按工件类型进行规范默认命名（如：标题_实施方案.md、标题_任务清单.md、标题_变更报告.md）。
+  - 增加精致悬浮微动效、手型光标与高对比色彩反馈，交互更自然直观。
+
 ## [0.3.0] - 2026-11-03
 
 ### Fixed

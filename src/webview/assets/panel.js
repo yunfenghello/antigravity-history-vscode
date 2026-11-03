@@ -63,6 +63,7 @@
       exportJsonTooltip: '导出 JSON',
       copyIdTooltip: '复制 ID',
       savePlanTooltip: '弹出另存为窗口，将实施方案保存至项目目录',
+      saveArtifactTooltip: '点击单独另存 {0} ({1}) 至本地项目目录',
       saveAllArtifactsTooltip: '选择目标文件夹，一键导出该计划的全部工件文档',
       openPlanSourceTooltip: '在系统文件资源管理器中查看脑图源文件夹',
       savePlanBtn: '另存方案',
@@ -692,11 +693,12 @@
       ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
       : `<div class="conv-workspace" style="color:var(--vscode-descriptionForeground)"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`;
 
-    // 渲染工件徽章
+    // 渲染工件徽章（升级为交互式单件下载按钮）
     let badgesHtml = '<div class="artifact-badge-group">';
     for (const art of plan.artifacts) {
       const isMain = art.fileName === 'implementation_plan.md';
-      badgesHtml += `<span class="artifact-badge ${isMain ? 'primary' : ''}">${esc(art.label)} (${art.fileName})</span>`;
+      const tooltip = t('saveArtifactTooltip', art.label, art.fileName);
+      badgesHtml += `<button class="artifact-badge ${isMain ? 'primary' : ''}" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="${esc(art.fileName)}" title="${esc(tooltip)}"><span class="badge-icon">↓</span> ${esc(art.label)} (${esc(art.fileName)})</button>`;
     }
     badgesHtml += '</div>';
 

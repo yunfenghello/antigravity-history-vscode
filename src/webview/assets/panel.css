@@ -538,17 +538,44 @@ body {
 
 .artifact-badge {
   font-size: 11px;
+  line-height: 18px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--vscode-foreground);
+  background: var(--vscode-button-secondaryBackground, #2d2d30);
+  color: var(--vscode-foreground, #cccccc);
   border: 1px solid var(--vscode-panel-border, #444);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.artifact-badge:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #3e3e42);
+  color: var(--vscode-foreground, #ffffff);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  transform: translateY(-1px);
 }
 
 .artifact-badge.primary {
-  background: rgba(14, 99, 156, 0.2);
+  background: rgba(14, 99, 156, 0.22);
   border-color: #0e639c;
   color: #70b8ff;
+}
+
+.artifact-badge.primary:hover {
+  background: rgba(14, 99, 156, 0.45);
+  border-color: #3794ff;
+  color: #ffffff;
+}
+
+.artifact-badge .badge-icon {
+  font-size: 10px;
+  font-weight: bold;
+  opacity: 0.85;
 }
 
 
