@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as child_process from 'child_process';
 import { discoverAndListAll, getTrajectorySteps, getLiveWorkingEndpoints, TrajectorySummary, LsEndpoint } from './ls-client.js';
 import { recoverUnindexed, getCandidateConvDirs, getConversationsDir, scanDiskConversations } from './recovery.js';
-import { readCache, writeCache } from './cache.js';
+import { readCache, writeCache, pruneCache } from './cache.js';
 import { parseSteps, FieldLevel } from './parser.js';
 import {
   formatMarkdown,
@@ -265,7 +265,7 @@ export function getConversationWorkspace(cascadeId: string): string | null {
 }
 
 /**
- * 处理数据刷新完整生命周期（本地全量优先 + 平滑元数据回填）
+ * 处理数据刷新完整生命周期（本地全量优先 + 平滑元数据回填 + 强一致性缓存淘汰）
  */
 async function handleRefresh(): Promise<void> {
   try {
@@ -275,26 +275,57 @@ async function handleRefresh(): Promise<void> {
     const localCache = readCache();
     cachedConversations = { ...localCache, ...cachedConversations };
 
-    // 步骤 1：扫描磁盘上所有物理会话文件（全量会话）
+    // 步骤 1：扫描磁盘上所有物理会话实体（覆盖 conversations 与 brain 目录，感知 wal 写入）
     const candidateDirs = getCandidateConvDirs(detectedAppDataDirs);
     const diskItems = scanDiskConversations(candidateDirs);
 
+    // 步骤 2：并行扫描运行中的语言服务进程/agy hub 实例并获取当前索引会话
+    const result = await discoverAndListAll();
+    cachedEndpointMap = result.cascadeToEndpoint;
+    detectedAppDataDirs = result.appDataDirs;
+    availableEndpoints = result.endpoints;
+
+    // 步骤 3：强一致性淘汰机制（彻底清除已物理删除的无效幽灵会话）
+    const validIds = new Set<string>();
+    for (const item of diskItems) { validIds.add(item.id); }
+    for (const id of Object.keys(result.conversations)) { validIds.add(id); }
+
+    // 从内存与持久化缓存中移除磁盘上已不存在的幽灵残留会话
+    for (const key of Object.keys(cachedConversations)) {
+      if (!validIds.has(key)) {
+        delete cachedConversations[key];
+      }
+    }
+    pruneCache(validIds);
+
+    // 步骤 4：将磁盘扫描项合并（对新会话或时间更新项生效，确保最新修改置顶）
     for (const item of diskItems) {
-      if (!cachedConversations[item.id]) {
+      const existing = cachedConversations[item.id];
+      if (!existing) {
         cachedConversations[item.id] = {
           summary: `会话 ${item.id.slice(0, 8)}`,
           lastModifiedTime: item.mtime.toISOString(),
           createdTime: item.mtime.toISOString(),
           stepCount: 1,
         };
+      } else {
+        const itemMtimeIso = item.mtime.toISOString();
+        if (!existing.lastModifiedTime || item.mtime.getTime() > new Date(existing.lastModifiedTime).getTime()) {
+          existing.lastModifiedTime = itemMtimeIso;
+        }
       }
+    }
+
+    // 步骤 5：将语言服务返回的实时活跃摘要合并
+    for (const [id, info] of Object.entries(result.conversations)) {
+      cachedConversations[id] = { ...(cachedConversations[id] || {}), ...info };
     }
 
     // 同步当前语言与配置状态至 Webview
     const currentLang = getCurrentLanguage();
     postMessage({ command: 'setLanguage', language: currentLang });
 
-    // 立即向前端推送全量会话列表
+    // 立即向前端推送全量会话列表（包括今天最新会话）
     postMessage({ command: 'setConversations', data: cachedConversations, convDir: primaryConvDir });
 
     // 同步导出配置状态至 Webview
@@ -306,28 +337,20 @@ async function handleRefresh(): Promise<void> {
     postMessage({ command: 'setExportStrategy', strategy: exportStrategy });
     postMessage({ command: 'setSingleExportMode', mode: singleExportMode });
 
-    // 步骤 2：扫描运行中的 LanguageServer 进程并获取当前已索引的会话
-    const result = await discoverAndListAll();
-    cachedEndpointMap = result.cascadeToEndpoint;
-    detectedAppDataDirs = result.appDataDirs;
-    availableEndpoints = result.endpoints;
-
-    // 将 LS 中已有的摘要合并进去
-    for (const [id, info] of Object.entries(result.conversations)) {
-      cachedConversations[id] = { ...(cachedConversations[id] || {}), ...info };
-    }
-    postMessage({ command: 'setConversations', data: cachedConversations, convDir: getConvDir() });
-
-    // 步骤 3：针对未索引或标题未丰富的会话，后台平滑恢复
+    // 步骤 6：针对未索引或标题未丰富的会话，轻量温和后台补充
     if (result.endpoints.length > 0) {
       const epList = result.endpoints.map((e) => ({ port: e.port, csrf: e.csrf }));
       const unindexed = diskItems
-        .filter((item) => !(item.id in result.conversations))
+        .filter((item) => {
+          const c = cachedConversations[item.id];
+          return !c || !c.summary || c.summary.startsWith('会话 ') || c.summary === 'Untitled Conversation';
+        })
         .map((item) => item.id);
 
       if (unindexed.length > 0) {
+        const toRecover = unindexed.slice(0, 50);
         const recovery = await recoverUnindexed(
-          unindexed,
+          toRecover,
           epList,
           (done: number, total: number) => {
             postMessage({ command: 'recoverProgress', done, total });
@@ -338,19 +361,13 @@ async function handleRefresh(): Promise<void> {
         );
 
         if (recovery.activated > 0) {
-          const refreshed = await discoverAndListAll();
-          cachedEndpointMap = refreshed.cascadeToEndpoint;
-          availableEndpoints = refreshed.endpoints;
-          for (const [id, info] of Object.entries(refreshed.conversations)) {
-            cachedConversations[id] = { ...(cachedConversations[id] || {}), ...info };
-          }
           postMessage({ command: 'setConversations', data: cachedConversations, convDir: getConvDir() });
           postMessage({ command: 'recoverDone', activated: recovery.activated, total: recovery.total });
         }
       }
     }
 
-    // 步骤 4：持久化至本地缓存文件
+    // 步骤 7：持久化至本地缓存文件
     writeCache(cachedConversations);
   } catch (e) {
     postMessage({ command: 'error', text: `会话扫描失败: ${e}` });

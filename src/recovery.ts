@@ -2,12 +2,12 @@
  * 本地会话扫描与全量恢复管理模块
  *
  * 核心功能：
- * - 扫描本地数据目录（兼容 antigravity-ide 与 antigravity）
- * - 支持扫描 SQLite (.db) 数据库与 Protobuf (.pb) 会话实体文件
- * - 提取文件元数据（时间戳、大小、ID）构建全量会话快照
- * - 针对未索引会话执行平滑并发恢复，逐步完善标题与工作区关联
+ * - 扫描本地数据目录（兼容 antigravity-ide、antigravity 与 brain 脑图目录）
+ * - 支持扫描 SQLite (.db/.db-wal) 数据库与 Protobuf (.pb) 及本地元数据
+ * - 精准比对 .db-wal 活跃写入时间戳，确保最新修改会话置顶
+ * - 输出物理真实存在的会话 ID 集合，为缓存淘汰与一致性校验提供事实依据
  *
- * 作者/更新时间: fengyun / 2026-08-14
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
  */
 
 import * as fs from 'fs';
@@ -15,24 +15,28 @@ import * as path from 'path';
 import * as os from 'os';
 import { callApi, TrajectorySummary } from './ls-client.js';
 
+export interface DiskConversationItem {
+  id: string;
+  filePath: string;
+  mtime: Date;
+  size: number;
+}
+
 /**
  * 获取所有存在会话实体文件的候选目录列表
- * 优先级：动态发现的 appDataDir -> antigravity-ide -> antigravity
  */
 export function getCandidateConvDirs(customAppDirs: string[] = []): string[] {
   const home = os.homedir();
   const dirNames = new Set<string>();
 
-  // 1. 优先添加动态提取的 appDataDir
   for (const name of customAppDirs) {
     if (name && typeof name === 'string') {
       dirNames.add(name);
     }
   }
 
-  // 2. 默认推荐目录顺序：新版 antigravity-ide 优先，旧版 antigravity 兜底
-  dirNames.add('antigravity-ide');
   dirNames.add('antigravity');
+  dirNames.add('antigravity-ide');
 
   const validDirs: string[] = [];
   for (const name of dirNames) {
@@ -41,11 +45,18 @@ export function getCandidateConvDirs(customAppDirs: string[] = []): string[] {
       validDirs.push(p);
     }
   }
+
+  // 纳管 brain 目录
+  const brainDir = path.join(home, '.gemini', 'antigravity', 'brain');
+  if (fs.existsSync(brainDir)) {
+    validDirs.push(brainDir);
+  }
+
   return validDirs;
 }
 
 /**
- * 获取主会话目录路径（优先新版 antigravity-ide）
+ * 获取主会话目录路径
  */
 export function getConversationsDir(customAppDirs: string[] = []): string | null {
   const dirs = getCandidateConvDirs(customAppDirs);
@@ -53,67 +64,92 @@ export function getConversationsDir(customAppDirs: string[] = []): string | null
 }
 
 /**
- * 扫描指定目录下的所有实体文件，返回会话详细文件快照
+ * 扫描指定目录下的所有实体文件，返回物理真实存在的会话快照
  */
-export function scanDiskConversations(convDirs: string | string[]): Array<{
-  id: string;
-  filePath: string;
-  mtime: Date;
-  size: number;
-}> {
+export function scanDiskConversations(convDirs: string | string[]): DiskConversationItem[] {
   const dirs = Array.isArray(convDirs) ? convDirs : [convDirs];
-  const map = new Map<string, { id: string; filePath: string; mtime: Date; size: number }>();
+  const map = new Map<string, DiskConversationItem>();
 
   for (const dir of dirs) {
     if (!dir || !fs.existsSync(dir)) { continue; }
     try {
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        let id: string | null = null;
-        if (file.endsWith('.db') && !file.endsWith('.db-wal') && !file.endsWith('.db-shm')) {
-          id = file.slice(0, -3);
-        } else if (file.endsWith('.pb')) {
-          id = file.slice(0, -3);
-        }
-        if (id) {
+      const isBrainDir = path.basename(dir) === 'brain';
+      const items = fs.readdirSync(dir);
+
+      if (isBrainDir) {
+        // brain 目录下每个子目录为一个会话 ID
+        for (const sub of items) {
+          if (sub === 'tempmediaStorage' || sub.startsWith('.')) { continue; }
+          const subPath = path.join(dir, sub);
           try {
-            const filePath = path.join(dir, file);
-            const stat = fs.statSync(filePath);
-            const existing = map.get(id);
-            // 保留最新修改时间的文件记录
-            if (!existing || stat.mtime.getTime() > existing.mtime.getTime()) {
-              map.set(id, { id, filePath, mtime: stat.mtime, size: stat.size });
+            const stat = fs.statSync(subPath);
+            if (stat.isDirectory()) {
+              const existing = map.get(sub);
+              if (!existing || stat.mtime.getTime() > existing.mtime.getTime()) {
+                map.set(sub, { id: sub, filePath: subPath, mtime: stat.mtime, size: 0 });
+              }
             }
-          } catch { }
+          } catch {
+            // 安全忽略不可访问目录
+          }
+        }
+      } else {
+        // conversations 目录下扫描 .db 与 .pb 文件
+        for (const file of items) {
+          let id: string | null = null;
+          if (file.endsWith('.db') && !file.endsWith('.db-wal') && !file.endsWith('.db-shm')) {
+            id = file.slice(0, -3);
+          } else if (file.endsWith('.pb')) {
+            id = file.slice(0, -3);
+          }
+
+          if (id) {
+            try {
+              const filePath = path.join(dir, file);
+              const stat = fs.statSync(filePath);
+              let latestMtime = stat.mtime;
+
+              // 检查关联的 .db-wal 活跃写入日志
+              const walPath = path.join(dir, `${file}-wal`);
+              if (fs.existsSync(walPath)) {
+                try {
+                  const walStat = fs.statSync(walPath);
+                  if (walStat.mtime.getTime() > latestMtime.getTime()) {
+                    latestMtime = walStat.mtime;
+                  }
+                } catch {
+                  // 忽略 wal 读取异常
+                }
+              }
+
+              const existing = map.get(id);
+              if (!existing || latestMtime.getTime() > existing.mtime.getTime()) {
+                map.set(id, { id, filePath, mtime: latestMtime, size: stat.size });
+              }
+            } catch {
+              // 安全忽略无法访问的文件
+            }
+          }
         }
       }
-    } catch { }
+    } catch {
+      // 安全忽略目录扫描异常
+    }
   }
 
   return Array.from(map.values());
 }
 
 /**
- * 扫描指定目录下的会话实体文件，提取所有唯一的会话 ID
+ * 提取磁盘物理存在的全部有效会话 ID 集合
  */
-export function scanConversationFiles(convDirs: string | string[]): string[] {
-  return scanDiskConversations(convDirs).map((item) => item.id);
+export function getValidDiskConversationIds(convDirs: string | string[]): Set<string> {
+  const items = scanDiskConversations(convDirs);
+  return new Set(items.map((it) => it.id));
 }
 
 /**
- * 兼容旧方法：扫描单目录中的会话文件
- */
-export function scanPbFiles(convDir: string): string[] {
-  return scanConversationFiles(convDir);
-}
-
-/**
- * 自动平滑恢复本地存在但尚未被 LanguageServer 索引的会话
- *
- * @param unindexedIds 待恢复的会话 ID 列表
- * @param endpoints 可用的 LanguageServer 终端列表
- * @param onProgress 进度回调函数
- * @param onItemLoaded 当成功拉取单条会话详情时的回调（用于实时更新标题与工作区）
+ * 恢复未索引会话的核心摘要与标题（优先通过可用端点）
  */
 export async function recoverUnindexed(
   unindexedIds: string[],
@@ -127,9 +163,8 @@ export async function recoverUnindexed(
 
   let activated = 0;
   let failed = 0;
+  const batchSize = 5;
 
-  // 采用温和并发（每批 3 条），避免拥塞 LS 端口与 SQLite 文件锁
-  const batchSize = 3;
   for (let i = 0; i < unindexedIds.length; i += batchSize) {
     const batch = unindexedIds.slice(i, i + batchSize);
     const promises = batch.map(async (cascadeId, j) => {
@@ -139,21 +174,31 @@ export async function recoverUnindexed(
         ep.csrf,
         'GetCascadeTrajectorySteps',
         { cascadeId, startIndex: 0, endIndex: 1 },
-        6000,
+        5000,
       );
 
       if (result) {
-        // 如果返回了步骤数据，尝试提取第一条用户输入作为标题
-        const steps = (result.steps as Array<{ userInput?: { userQuery?: string; userResponse?: string } }>) ||
-          (result.messages as Array<{ userInput?: { userQuery?: string } }>);
+        const steps = (result.steps as Array<{ userInput?: { userQuery?: string; userResponse?: string; items?: Array<{ text?: string }> } }>) ||
+          (result.messages as Array<{ userInput?: { userQuery?: string; userResponse?: string; items?: Array<{ text?: string }> } }>);
+
         let extractedTitle = '';
         if (steps && steps.length > 0) {
           const first = steps[0];
-          extractedTitle = first.userInput?.userQuery || first.userInput?.userResponse || '';
-          if (extractedTitle) {
-            extractedTitle = extractedTitle.replace(/[\r\n]+/g, ' ').trim().slice(0, 50);
+          if (first.userInput) {
+            if (Array.isArray(first.userInput.items)) {
+              for (const it of first.userInput.items) {
+                if (typeof it.text === 'string' && it.text.trim()) {
+                  extractedTitle += ' ' + it.text.trim();
+                }
+              }
+            }
+            if (!extractedTitle.trim()) {
+              extractedTitle = first.userInput.userQuery || first.userInput.userResponse || '';
+            }
+            extractedTitle = extractedTitle.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 50);
           }
         }
+
         if (extractedTitle) {
           onItemLoaded?.(cascadeId, { summary: extractedTitle });
         }
@@ -171,8 +216,6 @@ export async function recoverUnindexed(
       }
       onProgress?.(activated + failed, unindexedIds.length, r.cascadeId);
     }
-    // 平滑延时
-    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   return { activated, failed, total: unindexedIds.length };

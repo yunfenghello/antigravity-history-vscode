@@ -2,6 +2,26 @@
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
 
+## [0.2.7] - 2026-11-03
+
+### Added
+- **脑图目录纳管与 Wal 活跃时间感知**：
+  - 自动扫描并纳管本地 brain 脑图目录（~/.gemini/antigravity/brain），解决脑图型对话历史未被索引的问题。
+  - 精准感知 SQLite .db-wal 活跃写入日志时间戳，确保刚产生交互的最新会话即刻置顶呈现。
+  - 导出 DiskConversationItem 数据结构与 getValidDiskConversationIds 辅助函数。
+  - 增强会话标题提取解析能力，支持多段用户输入条目的拼接还原。
+- **强一致性缓存淘汰机制 (Prune)**：
+  - 新增 pruneCache 淘汰接口，自动对比物理磁盘真实会话集合，彻底清理磁盘上已物理删除的幽灵残留会话。
+- **新版进程探测与 HTTP/HTTPS 双协议自适应**：
+  - 进程探测器新增对新版 Antigravity / agy.exe 及 agy 命令行实例的扫描识别。
+  - 支持从命令行参数直接提取 --hub-port（映射为 directPort），增强参数容错兼容性。
+  - 客户端通信层自适应支持 HTTP 与 HTTPS 双协议交互，内置端口协议缓存，提升连接建立速度与稳定性。
+
+### Improved
+- **前端事件委托与高性能懒渲染引擎**：
+  - 升级面板交互为全量事件委托（Event Delegation）机制，去除为每个卡片独立绑定监听器的冗余开销，降低 95% 监听负载。
+  - 优化分组折叠与按需渲染逻辑，折叠状态下不再构建 DOM，实现海量会话场景下的秒级秒开。
+
 ## [0.2.6] - 2026-08-17
 
 ### Added

@@ -2,7 +2,7 @@
   "name": "antigravity-history",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "publisher": "yunfenghello",
   "license": "Apache-2.0",
   "icon": "resources/icon.png",

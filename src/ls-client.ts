@@ -2,14 +2,15 @@
  * LanguageServer API 交互客户端
  *
  * 核心功能：
- * - 发起 gRPC-Web (Connect-Protocol) 请求至 LanguageServer
- * - 智能动态端口探测与高可用自动故障转移 (Failover)
+ * - 发起 gRPC-Web (Connect-Protocol) 请求至 LanguageServer 与 agy hub
+ * - 自适应支持 HTTP 与 HTTPS 双协议通信
  * - 查询所有历史轨迹摘要列表 (GetAllCascadeTrajectories)
  * - 分页获取指定轨迹的详细步骤 (GetCascadeTrajectorySteps)
  *
- * 作者/更新时间: fengyun / 2026-08-14
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
  */
 
+import * as http from 'http';
 import * as https from 'https';
 import { LsEndpoint, LsProcess, discoverLanguageServers, findPorts } from './discovery.js';
 
@@ -50,17 +51,24 @@ export interface TrajectoryStep {
 }
 
 /**
- * 调用 LanguageServer gRPC-Web 接口
+ * 协议缓存映射表，记录每个端口的有效通信协议
  */
-export function callApi(
+const portProtocolCache = new Map<number, 'http' | 'https'>();
+
+/**
+ * 单次单协议请求封装
+ */
+function sendRequest(
+  isHttps: boolean,
   port: number,
   csrfToken: string,
   method: string,
-  params: Record<string, unknown> = {},
-  timeout = 15000,
+  params: Record<string, unknown>,
+  timeout: number,
 ): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const body = JSON.stringify(params);
+    const mod = isHttps ? https : http;
     const options: https.RequestOptions = {
       hostname: 'localhost',
       port,
@@ -76,7 +84,7 @@ export function callApi(
       timeout,
     };
 
-    const req = https.request(options, (res) => {
+    const req = mod.request(options, (res) => {
       let data = '';
       res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
       res.on('end', () => {
@@ -104,37 +112,74 @@ export function callApi(
 }
 
 /**
- * 从单个 LanguageServer 实例获取所有轨迹摘要
+ * 调用 LanguageServer gRPC-Web 接口（自适应 HTTP / HTTPS）
+ */
+export async function callApi(
+  port: number,
+  csrfToken: string,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeout = 10000,
+): Promise<Record<string, unknown> | null> {
+  const cachedProto = portProtocolCache.get(port);
+
+  if (cachedProto === 'http') {
+    const res = await sendRequest(false, port, csrfToken, method, params, timeout);
+    if (res !== null) { return res; }
+  } else if (cachedProto === 'https') {
+    const res = await sendRequest(true, port, csrfToken, method, params, timeout);
+    if (res !== null) { return res; }
+  }
+
+  // 优先探测 HTTP（新版 agy hub 采用 HTTP 协议）
+  const httpRes = await sendRequest(false, port, csrfToken, method, params, timeout);
+  if (httpRes !== null) {
+    portProtocolCache.set(port, 'http');
+    return httpRes;
+  }
+
+  // 备用探测 HTTPS（旧版语言服务）
+  const httpsRes = await sendRequest(true, port, csrfToken, method, params, timeout);
+  if (httpsRes !== null) {
+    portProtocolCache.set(port, 'https');
+    return httpsRes;
+  }
+
+  return null;
+}
+
+/**
+ * 从单个服务实例获取所有轨迹摘要
  */
 export async function getAllTrajectories(
   port: number,
   csrf: string,
 ): Promise<Record<string, TrajectorySummary>> {
-  const result = await callApi(port, csrf, 'GetAllCascadeTrajectories', {}, 15000);
+  const result = await callApi(port, csrf, 'GetAllCascadeTrajectories', {}, 10000);
   if (!result) { return {}; }
   return (result.trajectorySummaries as Record<string, TrajectorySummary>) || {};
 }
 
 /**
- * 实时动态寻找至少一个当前可用且响应正常的 LanguageServer 终端
- * 绝不单纯依赖历史缓存，保障高并发下的 100% 连通率
+ * 实时动态寻找当前可用且响应正常的端点列表
  */
 export async function getLiveWorkingEndpoints(): Promise<LsEndpoint[]> {
   const servers = discoverLanguageServers();
   const endpoints: LsEndpoint[] = [];
 
   for (const srv of servers) {
-    const ports = findPorts(srv.pid);
+    const ports = findPorts(srv.pid, srv.directPort);
     for (const port of ports) {
-      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 10000);
+      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 4000);
       if (result !== null) {
         endpoints.push({
           port,
           csrf: srv.csrf,
           pid: srv.pid,
           appDataDir: srv.appDataDir,
+          protocol: portProtocolCache.get(port) || 'http',
         });
-        break; // 找到当前进程的一个工作端口
+        break;
       }
     }
   }
@@ -143,7 +188,7 @@ export async function getLiveWorkingEndpoints(): Promise<LsEndpoint[]> {
 }
 
 /**
- * 自动发现所有运行中的 LanguageServer 实例并汇总会话列表
+ * 自动发现所有运行中的语言服务实例并汇总会话列表
  */
 export async function discoverAndListAll(): Promise<{
   conversations: Record<string, TrajectorySummary>;
@@ -164,12 +209,12 @@ export async function discoverAndListAll(): Promise<{
   }
 
   for (const srv of servers) {
-    const ports = findPorts(srv.pid);
+    const ports = findPorts(srv.pid, srv.directPort);
     let workingPort: number | null = null;
     let foundSummaries: Record<string, TrajectorySummary> = {};
 
     for (const port of ports) {
-      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 15000);
+      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 4000);
       if (result !== null) {
         workingPort = port;
         foundSummaries = (result.trajectorySummaries as Record<string, TrajectorySummary>) || {};
@@ -178,7 +223,13 @@ export async function discoverAndListAll(): Promise<{
     }
 
     if (workingPort !== null) {
-      endpoints.push({ port: workingPort, csrf: srv.csrf, pid: srv.pid, appDataDir: srv.appDataDir });
+      endpoints.push({
+        port: workingPort,
+        csrf: srv.csrf,
+        pid: srv.pid,
+        appDataDir: srv.appDataDir,
+        protocol: portProtocolCache.get(workingPort) || 'http',
+      });
       for (const [cid, info] of Object.entries(foundSummaries)) {
         if (!(cid in conversations)) {
           conversations[cid] = info;
@@ -212,7 +263,7 @@ export async function getTrajectorySteps(
     csrf,
     'GetCascadeTrajectorySteps',
     { cascadeId, startIndex: 0, endIndex: stepCount + 10 },
-    25000,
+    15000,
   );
 
   let steps = (result?.steps as TrajectoryStep[]) || (result?.messages as TrajectoryStep[]);
@@ -228,7 +279,7 @@ export async function getTrajectorySteps(
       ep.csrf,
       'GetCascadeTrajectorySteps',
       { cascadeId, startIndex: 0, endIndex: stepCount + 10 },
-      15000,
+      10000,
     );
     steps = (result?.steps as TrajectoryStep[]) || (result?.messages as TrajectoryStep[]);
     if (steps && steps.length > 0) {
@@ -236,7 +287,7 @@ export async function getTrajectorySteps(
     }
   }
 
-  // 3. 若均未命中，现场执行一次实时端点探测再试
+  // 3. 实时现场端点重试
   const freshEndpoints = await getLiveWorkingEndpoints();
   for (const ep of freshEndpoints) {
     result = await callApi(
@@ -244,7 +295,7 @@ export async function getTrajectorySteps(
       ep.csrf,
       'GetCascadeTrajectorySteps',
       { cascadeId, startIndex: 0, endIndex: stepCount + 10 },
-      15000,
+      10000,
     );
     steps = (result?.steps as TrajectoryStep[]) || (result?.messages as TrajectoryStep[]);
     if (steps && steps.length > 0) {

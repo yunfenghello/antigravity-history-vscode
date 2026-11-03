@@ -1,11 +1,12 @@
 /**
- * 会话摘要本地缓存管理模块
+ * 本地会话摘要持久化缓存与淘汰清理模块
  *
  * 核心功能：
- * - 缓存最近一次成功获取的会话列表，实现 IDE 重启后的秒级极速渲染
- * - 在每次成功 API 刷新后增量更新本地 JSON 缓存文件
+ * - 缓存会话列表元数据，实现重启后毫秒级秒开
+ * - 提供缓存淘汰接口（Prune），自动清理磁盘上已物理删除的幽灵残留会话
+ * - 安全序列化与容错处理
  *
- * 作者/更新时间: fengyun / 2026-08-14
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
  */
 
 import * as fs from 'fs';
@@ -23,7 +24,7 @@ interface CacheData {
 }
 
 /**
- * Read cached conversation summaries. Returns empty object on any error.
+ * 读取持久化缓存
  */
 export function readCache(): Record<string, TrajectorySummary> {
   try {
@@ -38,7 +39,7 @@ export function readCache(): Record<string, TrajectorySummary> {
 }
 
 /**
- * Write conversation summaries to cache.
+ * 写入持久化缓存
  */
 export function writeCache(conversations: Record<string, TrajectorySummary>): void {
   try {
@@ -48,8 +49,30 @@ export function writeCache(conversations: Record<string, TrajectorySummary>): vo
       updatedAt: new Date().toISOString(),
       conversations,
     };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data), 'utf-8');
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch {
-    // Silently ignore write failures
+    // 写入失败安全处理
   }
+}
+
+/**
+ * 缓存淘汰机制：严格对比真实合法 ID 集合，剔除物理磁盘或服务上已不存在的无效残留会话
+ */
+export function pruneCache(validIds: Set<string>): Record<string, TrajectorySummary> {
+  const current = readCache();
+  const pruned: Record<string, TrajectorySummary> = {};
+  let removedCount = 0;
+
+  for (const [id, summary] of Object.entries(current)) {
+    if (validIds.has(id)) {
+      pruned[id] = summary;
+    } else {
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0) {
+    writeCache(pruned);
+  }
+  return pruned;
 }
