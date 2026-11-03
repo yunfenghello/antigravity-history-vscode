@@ -2,9 +2,10 @@
  * 本地会话扫描与全量恢复管理模块
  *
  * 核心功能：
- * - 扫描本地数据目录（兼容 antigravity-ide、antigravity 与 brain 脑图目录）
- * - 支持扫描 SQLite (.db/.db-wal) 数据库与 Protobuf (.pb) 及本地元数据
+ * - 扫描本地数据目录中的会话实体文件（兼容 antigravity-ide 与 antigravity）
+ * - 支持扫描 SQLite (.db/.db-wal) 数据库与 Protobuf (.pb) 文件
  * - 精准比对 .db-wal 活跃写入时间戳，确保最新修改会话置顶
+ * - 提取多段用户输入条目（items）拼接还原真实会话大标题
  * - 输出物理真实存在的会话 ID 集合，为缓存淘汰与一致性校验提供事实依据
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
@@ -23,7 +24,7 @@ export interface DiskConversationItem {
 }
 
 /**
- * 获取所有存在会话实体文件的候选目录列表
+ * 获取所有存在会话实体文件的候选目录列表（排除脑图工件目录，保障会话纯净）
  */
 export function getCandidateConvDirs(customAppDirs: string[] = []): string[] {
   const home = os.homedir();
@@ -44,12 +45,6 @@ export function getCandidateConvDirs(customAppDirs: string[] = []): string[] {
     if (fs.existsSync(p)) {
       validDirs.push(p);
     }
-  }
-
-  // 纳管 brain 目录
-  const brainDir = path.join(home, '.gemini', 'antigravity', 'brain');
-  if (fs.existsSync(brainDir)) {
-    validDirs.push(brainDir);
   }
 
   return validDirs;
@@ -73,62 +68,42 @@ export function scanDiskConversations(convDirs: string | string[]): DiskConversa
   for (const dir of dirs) {
     if (!dir || !fs.existsSync(dir)) { continue; }
     try {
-      const isBrainDir = path.basename(dir) === 'brain';
       const items = fs.readdirSync(dir);
 
-      if (isBrainDir) {
-        // brain 目录下每个子目录为一个会话 ID
-        for (const sub of items) {
-          if (sub === 'tempmediaStorage' || sub.startsWith('.')) { continue; }
-          const subPath = path.join(dir, sub);
+      // conversations 目录下扫描 .db 与 .pb 真实对话实体
+      for (const file of items) {
+        let id: string | null = null;
+        if (file.endsWith('.db') && !file.endsWith('.db-wal') && !file.endsWith('.db-shm')) {
+          id = file.slice(0, -3);
+        } else if (file.endsWith('.pb')) {
+          id = file.slice(0, -3);
+        }
+
+        if (id) {
           try {
-            const stat = fs.statSync(subPath);
-            if (stat.isDirectory()) {
-              const existing = map.get(sub);
-              if (!existing || stat.mtime.getTime() > existing.mtime.getTime()) {
-                map.set(sub, { id: sub, filePath: subPath, mtime: stat.mtime, size: 0 });
+            const filePath = path.join(dir, file);
+            const stat = fs.statSync(filePath);
+            let latestMtime = stat.mtime;
+
+            // 检查关联的 .db-wal 活跃写入日志时间戳
+            const walPath = path.join(dir, `${file}-wal`);
+            if (fs.existsSync(walPath)) {
+              try {
+                const walStat = fs.statSync(walPath);
+                if (walStat.mtime.getTime() > latestMtime.getTime()) {
+                  latestMtime = walStat.mtime;
+                }
+              } catch {
+                // 忽略 wal 读取异常
               }
+            }
+
+            const existing = map.get(id);
+            if (!existing || latestMtime.getTime() > existing.mtime.getTime()) {
+              map.set(id, { id, filePath, mtime: latestMtime, size: stat.size });
             }
           } catch {
-            // 安全忽略不可访问目录
-          }
-        }
-      } else {
-        // conversations 目录下扫描 .db 与 .pb 文件
-        for (const file of items) {
-          let id: string | null = null;
-          if (file.endsWith('.db') && !file.endsWith('.db-wal') && !file.endsWith('.db-shm')) {
-            id = file.slice(0, -3);
-          } else if (file.endsWith('.pb')) {
-            id = file.slice(0, -3);
-          }
-
-          if (id) {
-            try {
-              const filePath = path.join(dir, file);
-              const stat = fs.statSync(filePath);
-              let latestMtime = stat.mtime;
-
-              // 检查关联的 .db-wal 活跃写入日志
-              const walPath = path.join(dir, `${file}-wal`);
-              if (fs.existsSync(walPath)) {
-                try {
-                  const walStat = fs.statSync(walPath);
-                  if (walStat.mtime.getTime() > latestMtime.getTime()) {
-                    latestMtime = walStat.mtime;
-                  }
-                } catch {
-                  // 忽略 wal 读取异常
-                }
-              }
-
-              const existing = map.get(id);
-              if (!existing || latestMtime.getTime() > existing.mtime.getTime()) {
-                map.set(id, { id, filePath, mtime: latestMtime, size: stat.size });
-              }
-            } catch {
-              // 安全忽略无法访问的文件
-            }
+            // 安全忽略无法访问的文件
           }
         }
       }

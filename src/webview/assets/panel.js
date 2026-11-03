@@ -2,11 +2,12 @@
 /**
  * Antigravity History — 前端视图交互、多语言与高性能事件委托渲染引擎
  *
- * 核心优化：
+ * 核心功能：
+ * - 【对话历史】与【方案计划】双栏视图独立隔离与即时切换
  * - 全量事件委托 (Event Delegation)，消除数千个节点的冗余监听器，渲染耗时降低 95%
  * - 分组智能折叠与按需懒渲染，折叠状态下不构建 DOM，秒级秒开
+ * - 方案计划专属下载：支持实施方案单文件弹窗另存为与全套工件一键导出到项目目录
  * - 内置轻量中英文多语言国际化词典，支持界面动态语言无刷新即时切换与持久化
- * - 支持单条导出（另存为/直接保存）、批量导出、会话工作区一键定位
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
  */
@@ -17,7 +18,10 @@
   // ── 多语言国际化词典 ──
   const i18n = {
     'zh-CN': {
-      searchPlaceholder: '搜索会话...',
+      tabConversations: '对话历史',
+      tabPlans: '方案计划',
+      searchPlaceholderConv: '搜索会话...',
+      searchPlaceholderPlan: '搜索方案计划标题或工作区...',
       groupDate: '日期',
       groupWorkspace: '工作区',
       expandAll: '展开',
@@ -25,7 +29,7 @@
       expandAllTitle: '全部展开',
       collapseAllTitle: '全部折叠',
       refresh: '刷新',
-      refreshTitle: '刷新会话列表',
+      refreshTitle: '刷新列表数据',
       strategyWorkspace: '按所属项目归类',
       strategyUnified: '统一导出目录',
       strategyTitle: '导出归属模式',
@@ -44,7 +48,10 @@
       clickToChange: '点击修改导出目录',
       totalConversations: '共 {0} / {1} 个会话',
       totalCountOnly: '{0} 个会话',
+      totalPlans: '共 {0} / {1} 个方案计划',
+      totalPlansCountOnly: '{0} 个方案计划',
       unnamedConv: '未命名会话',
+      unnamedPlan: '未命名方案计划',
       stepsUnit: '步',
       timeToday: '今天',
       timeYesterday: '昨天',
@@ -54,22 +61,33 @@
       openConvDataTooltip: '在文件资源管理器中打开会话存储目录: {0}',
       exportMdTooltip: '导出 Markdown',
       exportJsonTooltip: '导出 JSON',
-      copyIdTooltip: '复制会话 ID',
+      copyIdTooltip: '复制 ID',
+      savePlanTooltip: '弹出另存为窗口，将实施方案保存至项目目录',
+      saveAllArtifactsTooltip: '选择目标文件夹，一键导出该计划的全部工件文档',
+      openPlanSourceTooltip: '在系统文件资源管理器中查看脑图源文件夹',
+      savePlanBtn: '另存方案',
+      saveAllArtifactsBtn: '全部工件',
+      openSourceFolderBtn: '源目录',
       preparingExportMd: '准备导出 Markdown...',
       preparingExportJson: '准备导出 JSON...',
-      idCopied: '会话 ID 已复制',
+      idCopied: 'ID 已复制到剪贴板',
       syncingRecover: '正在同步恢复会话数据... {0}/{1}',
       recoverDone: '成功恢复 {0} 个会话',
       emptyTitle: '未找到会话记录',
       emptyDesc: '请确认 Antigravity 正在运行且已激活工作区。',
-      noResultsTitle: '未找到匹配 "{0}" 的会话',
+      emptyPlanTitle: '未发现方案计划文档',
+      emptyPlanDesc: '当与 AI 协作生成 implementation_plan.md 或 task.md 时将自动收录呈现。',
+      noResultsTitle: '未找到匹配 "{0}" 的记录',
       noResultsDesc: '请尝试其他搜索关键词。',
-      loadingText: '正在扫描并同步最新会话...',
+      loadingText: '正在扫描并同步最新数据...',
       errorTitle: '发生错误',
       retryBtn: '重试',
     },
     'en': {
-      searchPlaceholder: 'Search conversations...',
+      tabConversations: 'Conversations',
+      tabPlans: 'Plans & Artifacts',
+      searchPlaceholderConv: 'Search conversations...',
+      searchPlaceholderPlan: 'Search plan titles or workspaces...',
       groupDate: 'Date',
       groupWorkspace: 'Workspace',
       expandAll: 'Expand',
@@ -77,7 +95,7 @@
       expandAllTitle: 'Expand all groups',
       collapseAllTitle: 'Collapse all groups',
       refresh: 'Refresh',
-      refreshTitle: 'Refresh conversation list',
+      refreshTitle: 'Refresh list',
       strategyWorkspace: 'Categorized by Project',
       strategyUnified: 'Unified Directory',
       strategyTitle: 'Export Strategy',
@@ -96,7 +114,10 @@
       clickToChange: 'Click to change export path',
       totalConversations: 'Total {0} / {1} conversations',
       totalCountOnly: '{0} conversations',
+      totalPlans: 'Total {0} / {1} plans',
+      totalPlansCountOnly: '{0} plans',
       unnamedConv: 'Untitled Conversation',
+      unnamedPlan: 'Untitled Plan',
       stepsUnit: 'steps',
       timeToday: 'Today',
       timeYesterday: 'Yesterday',
@@ -106,17 +127,25 @@
       openConvDataTooltip: 'Open conversation storage in file explorer: {0}',
       exportMdTooltip: 'Export Markdown',
       exportJsonTooltip: 'Export JSON',
-      copyIdTooltip: 'Copy Conversation ID',
+      copyIdTooltip: 'Copy ID',
+      savePlanTooltip: 'Save implementation plan to project workspace via Save Dialog',
+      saveAllArtifactsTooltip: 'Export all artifacts for this plan to selected directory',
+      openPlanSourceTooltip: 'Open brain storage folder in file explorer',
+      savePlanBtn: 'Save Plan',
+      saveAllArtifactsBtn: 'All Artifacts',
+      openSourceFolderBtn: 'Source Dir',
       preparingExportMd: 'Preparing to export Markdown...',
       preparingExportJson: 'Preparing to export JSON...',
-      idCopied: 'Conversation ID copied to clipboard',
+      idCopied: 'ID copied to clipboard',
       syncingRecover: 'Syncing conversation data... {0}/{1}',
       recoverDone: 'Successfully recovered {0} conversations',
       emptyTitle: 'No conversations found',
       emptyDesc: 'Please make sure Antigravity is running and has active workspaces.',
-      noResultsTitle: 'No conversations matching "{0}"',
+      emptyPlanTitle: 'No plan artifacts found',
+      emptyPlanDesc: 'Plans will appear here when generated with implementation_plan.md or task.md.',
+      noResultsTitle: 'No records matching "{0}"',
       noResultsDesc: 'Try searching with different keywords.',
-      loadingText: 'Scanning and syncing conversations...',
+      loadingText: 'Scanning and syncing latest data...',
       errorTitle: 'Error Occurred',
       retryBtn: 'Retry',
     },
@@ -136,7 +165,9 @@
   }
 
   // ── 全局状态 ──
+  let activeTab = 'conversations'; // 'conversations' | 'plans'
   let conversations = {};
+  let plans = [];
   let convDataDir = '';
   let groupBy = 'date';
   let searchQuery = '';
@@ -144,9 +175,11 @@
   let exportPath = '';
 
   // ── DOM 节点缓存 ──
+  const tabConversationsBtn = document.getElementById('tab-conversations');
+  const tabPlansBtn = document.getElementById('tab-plans');
   const searchInput = document.getElementById('search-input');
-  const groupDateBtn = document.getElementById('btn-group-date');
-  const groupWorkspaceBtn = document.getElementById('btn-group-workspace');
+  const groupDateBtn = document.getElementById('group-date');
+  const groupWorkspaceBtn = document.getElementById('group-workspace');
   const expandAllBtn = document.getElementById('btn-expand-all');
   const collapseAllBtn = document.getElementById('btn-collapse-all');
   const refreshBtn = document.getElementById('btn-refresh');
@@ -159,9 +192,15 @@
   const listContainer = document.getElementById('list-container');
   const toastEl = document.getElementById('toast');
 
-  // ── 静态文案国际化刷新 ──
+  // ── 静态文案刷新 ──
   function updateStaticTexts() {
-    if (searchInput) searchInput.placeholder = t('searchPlaceholder');
+    if (tabConversationsBtn) tabConversationsBtn.textContent = t('tabConversations');
+    if (tabPlansBtn) tabPlansBtn.textContent = t('tabPlans');
+    if (searchInput) {
+      searchInput.placeholder = activeTab === 'conversations'
+        ? t('searchPlaceholderConv')
+        : t('searchPlaceholderPlan');
+    }
     if (groupDateBtn) groupDateBtn.textContent = t('groupDate');
     if (groupWorkspaceBtn) groupWorkspaceBtn.textContent = t('groupWorkspace');
     if (expandAllBtn) {
@@ -210,11 +249,48 @@
     }
   }
 
-  // ── 顶部交互事件监听 ──
+  // ── Tab 切换逻辑 ──
+  function switchTab(newTab) {
+    if (activeTab === newTab) return;
+    activeTab = newTab;
+    searchQuery = '';
+    if (searchInput) searchInput.value = '';
+
+    if (newTab === 'conversations') {
+      tabConversationsBtn?.classList.add('active');
+      tabPlansBtn?.classList.remove('active');
+      // 显示对话专用的分组与导出配置
+      if (exportAllBtn) exportAllBtn.style.display = 'inline-flex';
+      if (exportStrategySelect) exportStrategySelect.style.display = 'inline-block';
+      if (singleExportModeSelect) singleExportModeSelect.style.display = 'inline-block';
+      if (fieldLevelSelect) fieldLevelSelect.style.display = 'inline-block';
+      const segs = document.querySelectorAll('.segmented-control');
+      segs.forEach((s) => s.style.display = 'inline-flex');
+      renderList();
+    } else {
+      tabPlansBtn?.classList.add('active');
+      tabConversationsBtn?.classList.remove('active');
+      // 方案计划视图隐藏部分对话专用的配置选择框
+      if (exportAllBtn) exportAllBtn.style.display = 'none';
+      if (exportStrategySelect) exportStrategySelect.style.display = 'none';
+      if (singleExportModeSelect) singleExportModeSelect.style.display = 'none';
+      if (fieldLevelSelect) fieldLevelSelect.style.display = 'none';
+      const segs = document.querySelectorAll('.segmented-control');
+      segs.forEach((s) => s.style.display = 'none');
+      renderPlansList();
+    }
+    updateStaticTexts();
+  }
+
+  tabConversationsBtn?.addEventListener('click', () => switchTab('conversations'));
+  tabPlansBtn?.addEventListener('click', () => switchTab('plans'));
+
+  // ── 顶部按钮事件监听 ──
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
       showLoading();
       vscode.postMessage({ command: 'refresh' });
+      vscode.postMessage({ command: 'refreshPlans' });
     });
   }
 
@@ -247,14 +323,22 @@
       currentLang = langSelect.value;
       vscode.postMessage({ command: 'setLanguage', value: currentLang });
       updateStaticTexts();
-      renderList();
+      if (activeTab === 'conversations') {
+        renderList();
+      } else {
+        renderPlansList();
+      }
     });
   }
 
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
       searchQuery = e.target.value.trim().toLowerCase();
-      renderList();
+      if (activeTab === 'conversations') {
+        renderList();
+      } else {
+        renderPlansList();
+      }
     });
   }
 
@@ -296,7 +380,7 @@
 
   // ── 统一高性能事件委托 (Event Delegation) ──
   listContainer.addEventListener('click', (e) => {
-    // 1. 处理分组头部点击（展开/折叠）
+    // 1. 处理分组展开/折叠
     const header = e.target.closest('.date-group-header');
     if (header) {
       const group = header.getAttribute('data-group');
@@ -311,12 +395,13 @@
       return;
     }
 
-    // 2. 处理卡片动作按钮点击
+    // 2. 处理动作按钮点击
     const actionBtn = e.target.closest('[data-action]');
     if (actionBtn) {
       e.stopPropagation();
       const action = actionBtn.getAttribute('data-action');
       const cascadeId = actionBtn.getAttribute('data-id');
+      const planId = actionBtn.getAttribute('data-plan-id');
 
       if (action === 'exportMd') {
         vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
@@ -325,12 +410,22 @@
         vscode.postMessage({ command: 'export', cascadeId, format: 'json' });
         showToast(t('preparingExportJson'));
       } else if (action === 'copyId') {
-        vscode.postMessage({ command: 'copyId', cascadeId });
+        vscode.postMessage({ command: 'copyId', cascadeId: cascadeId || planId });
         showToast(t('idCopied'));
       } else if (action === 'openFolder') {
         const folderPath = actionBtn.getAttribute('data-path');
         if (folderPath) {
           vscode.postMessage({ command: 'openInExplorer', path: folderPath });
+        }
+      } else if (action === 'exportPlanSingle') {
+        const fileName = actionBtn.getAttribute('data-file-name') || 'implementation_plan.md';
+        vscode.postMessage({ command: 'exportPlanSingle', planId, fileName });
+      } else if (action === 'exportPlanAll') {
+        vscode.postMessage({ command: 'exportPlanAll', planId });
+      } else if (action === 'openPlanFolder') {
+        const folderPath = actionBtn.getAttribute('data-path');
+        if (folderPath) {
+          vscode.postMessage({ command: 'openPlanFolder', path: folderPath });
         }
       }
     }
@@ -344,14 +439,27 @@
         if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
           currentLang = msg.language;
           updateStaticTexts();
-          renderList();
+          if (activeTab === 'conversations') {
+            renderList();
+          } else {
+            renderPlansList();
+          }
         }
         break;
 
       case 'setConversations':
         conversations = msg.data || {};
         if (msg.convDir) convDataDir = msg.convDir;
-        renderList();
+        if (activeTab === 'conversations') {
+          renderList();
+        }
+        break;
+
+      case 'setPlans':
+        plans = msg.data || [];
+        if (activeTab === 'plans') {
+          renderPlansList();
+        }
         break;
 
       case 'setExportPath':
@@ -401,7 +509,7 @@
       bar = document.createElement('div');
       bar.id = 'export-path-bar';
       bar.className = 'export-path-bar';
-      const controls = document.querySelector('.controls');
+      const controls = document.querySelector('.top-bar');
       if (controls && controls.parentNode) {
         controls.parentNode.insertBefore(bar, controls.nextSibling);
       }
@@ -414,23 +522,22 @@
       <button class="btn btn-secondary btn-sm" id="btn-open-path">${t('openPath')}</button>
     `;
 
-    document.getElementById('btn-change-path').addEventListener('click', () => {
+    document.getElementById('btn-change-path')?.addEventListener('click', () => {
       vscode.postMessage({ command: 'changeExportPath' });
     });
-    document.getElementById('btn-open-path').addEventListener('click', () => {
+    document.getElementById('btn-open-path')?.addEventListener('click', () => {
       vscode.postMessage({ command: 'openExportFolder' });
     });
-    document.getElementById('export-path-text').addEventListener('click', () => {
+    document.getElementById('export-path-text')?.addEventListener('click', () => {
       vscode.postMessage({ command: 'changeExportPath' });
     });
   }
 
-  // ── 会话列表渲染核心 ──
+  // ── 对话历史渲染逻辑 ──
   function renderList() {
     const entries = Object.entries(conversations);
     const totalCount = entries.length;
 
-    // 关键词过滤
     const filtered = entries.filter(([cid, info]) => {
       if (!searchQuery) return true;
       const title = (info.summary || '').toLowerCase();
@@ -441,7 +548,6 @@
       return title.includes(searchQuery) || id.includes(searchQuery) || ws.includes(searchQuery);
     });
 
-    // 统计栏更新
     if (searchQuery) {
       statsBar.textContent = t('totalConversations', filtered.length, totalCount);
     } else {
@@ -458,7 +564,6 @@
       return;
     }
 
-    // 分组渲染
     renderGroups(filtered);
   }
 
@@ -481,7 +586,6 @@
 
       html += `<div class="date-group-items ${isCollapsed ? 'collapsed' : ''}">`;
 
-      // 极致性能优化：折叠状态下不构建内部卡片 DOM，降低 95% 虚拟与真实节点渲染耗时
       if (!isCollapsed) {
         for (const [cid, info] of items) {
           html += renderCard(cid, info);
@@ -528,6 +632,79 @@
           <button class="btn-export" data-action="exportMd" data-id="${esc(cascadeId)}" title="${esc(t('exportMdTooltip'))}">MD</button>
           <button class="btn-export" data-action="exportJson" data-id="${esc(cascadeId)}" title="${esc(t('exportJsonTooltip'))}">JSON</button>
           <button class="btn-export" data-action="copyId" data-id="${esc(cascadeId)}" title="${esc(t('copyIdTooltip'))}">ID</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── 方案计划渲染核心 ──
+  function renderPlansList() {
+    const totalCount = plans.length;
+
+    const filtered = plans.filter((plan) => {
+      if (!searchQuery) return true;
+      const title = (plan.title || '').toLowerCase();
+      const id = (plan.id || '').toLowerCase();
+      const ws = (plan.workspacePath || '').toLowerCase();
+      return title.includes(searchQuery) || id.includes(searchQuery) || ws.includes(searchQuery);
+    });
+
+    if (searchQuery) {
+      statsBar.textContent = t('totalPlans', filtered.length, totalCount);
+    } else {
+      statsBar.textContent = t('totalPlansCountOnly', totalCount);
+    }
+
+    if (totalCount === 0) {
+      listContainer.innerHTML = getEmptyPlansStateHtml();
+      return;
+    }
+
+    if (filtered.length === 0) {
+      listContainer.innerHTML = getNoResultsHtml(searchQuery);
+      return;
+    }
+
+    let html = '<div class="plans-list">';
+    for (const plan of filtered) {
+      html += renderPlanCard(plan);
+    }
+    html += '</div>';
+
+    listContainer.innerHTML = html;
+  }
+
+  function renderPlanCard(plan) {
+    const title = plan.title || t('unnamedPlan');
+    const time = formatTime(plan.lastModifiedTime);
+    const wsDisplay = plan.workspacePath ? toWinPath(plan.workspacePath) : t('noWorkspace');
+    const wsTooltip = t('openFolderTooltip', wsDisplay);
+
+    const wsHtml = plan.workspacePath
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}">📁 ${esc(wsDisplay)}</div>`
+      : `<div class="conv-workspace" style="color:var(--vscode-descriptionForeground)">📁 ${esc(wsDisplay)}</div>`;
+
+    // 渲染工件徽章
+    let badgesHtml = '<div class="artifact-badge-group">';
+    for (const art of plan.artifacts) {
+      const isMain = art.fileName === 'implementation_plan.md';
+      badgesHtml += `<span class="artifact-badge ${isMain ? 'primary' : ''}">${esc(art.label)} (${art.fileName})</span>`;
+    }
+    badgesHtml += '</div>';
+
+    return `
+      <div class="conv-card plan-card" data-plan-id="${esc(plan.id)}">
+        <div class="conv-icon"><span class="status-dot active">📋</span></div>
+        <div class="conv-info">
+          <div class="conv-title" style="font-weight:600;font-size:14px;" title="${esc(title)}">${esc(title)}</div>
+          <div class="conv-meta">${time} · ID: ${esc(plan.id.slice(0, 8))}...</div>
+          ${wsHtml}
+          ${badgesHtml}
+        </div>
+        <div class="conv-actions">
+          <button class="btn btn-primary btn-sm" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="implementation_plan.md" title="${esc(t('savePlanTooltip'))}">${esc(t('savePlanBtn'))}</button>
+          <button class="btn btn-secondary btn-sm" data-action="exportPlanAll" data-plan-id="${esc(plan.id)}" title="${esc(t('saveAllArtifactsTooltip'))}">${esc(t('saveAllArtifactsBtn'))}</button>
+          <button class="btn-export" data-action="openPlanFolder" data-path="${esc(plan.dirPath)}" title="${esc(t('openPlanSourceTooltip'))}">${esc(t('openSourceFolderBtn'))}</button>
         </div>
       </div>
     `;
@@ -605,7 +782,6 @@
     return groups;
   }
 
-  // ── 时间处理函数 ──
   function dateKey(d) {
     try {
       return d.toISOString().slice(0, 10);
@@ -629,7 +805,6 @@
     }
   }
 
-  // ── 恢复进度条 ──
   function showRecoverBanner(done, total) {
     let banner = document.getElementById('recover-banner');
     if (!banner) {
@@ -656,11 +831,18 @@
     }
   }
 
-  // ── 空状态与反馈 ──
   function getEmptyStateHtml() {
     return `<div class="empty-state">
       <div class="empty-state-title">${esc(t('emptyTitle'))}</div>
       <div class="empty-state-desc">${esc(t('emptyDesc'))}</div>
+      <button class="btn btn-primary" onclick="document.getElementById('btn-refresh').click()">${esc(t('refresh'))}</button>
+    </div>`;
+  }
+
+  function getEmptyPlansStateHtml() {
+    return `<div class="empty-state">
+      <div class="empty-state-title">${esc(t('emptyPlanTitle'))}</div>
+      <div class="empty-state-desc">${esc(t('emptyPlanDesc'))}</div>
       <button class="btn btn-primary" onclick="document.getElementById('btn-refresh').click()">${esc(t('refresh'))}</button>
     </div>`;
   }
@@ -684,7 +866,6 @@
     </div>`;
   }
 
-  // ── Toast 轻提示 ──
   let toastTimer;
   function showToast(text) {
     toastEl.textContent = text;
@@ -693,7 +874,6 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2000);
   }
 
-  // ── 辅助函数 ──
   function esc(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -717,4 +897,5 @@
   updateStaticTexts();
   showLoading();
   vscode.postMessage({ command: 'refresh' });
+  vscode.postMessage({ command: 'refreshPlans' });
 })();

@@ -441,3 +441,69 @@ body {
 .toast.show {
   opacity: 1;
 }
+
+
+/* ── View Switch Nav ── */
+.view-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(255, 255, 255, 0.08));
+}
+
+.view-nav-tabs {
+  display: inline-flex;
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-nav-btn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+
+.view-nav-btn:not(:last-child) {
+  border-right: 1px solid var(--vscode-input-border, #3c3c3c);
+}
+
+.view-nav-btn.active {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.view-nav-btn:hover:not(.active) {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
+}
+
+/* ── Plan Cards & Badges ── */
+.artifact-badge-group {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.artifact-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-panel-border, #444);
+}
+
+.artifact-badge.primary {
+  background: rgba(14, 99, 156, 0.2);
+  border-color: #0e639c;
+  color: #70b8ff;
+}

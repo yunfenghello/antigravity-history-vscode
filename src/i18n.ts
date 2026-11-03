@@ -6,7 +6,7 @@
  * - 提供类型安全的翻译函数及参数占位符格式化支持
  * - 支持根据用户配置与运行环境动态解析当前显示语言
  *
- * 作者/更新时间: fengyun / 2026-08-17
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
  */
 
 import * as vscode from 'vscode';
@@ -30,6 +30,7 @@ export const messages: Record<Language, Record<string, string>> = {
     'dialog.selectExportFolder': '选择导出目录',
     'dialog.save': '保存',
     'dialog.saveTitle': '保存对话导出 ({0})',
+    'dialog.savePlanTitle': '另存方案文档 ({0})',
     'filter.json': 'JSON 数据 (*.json)',
     'filter.markdown': 'Markdown 文档 (*.md)',
     'discovery.waiting': '正在等待 LanguageServer 发现完成...',
@@ -45,6 +46,10 @@ export const messages: Record<Language, Record<string, string>> = {
     'export.modeTitle': '单条导出模式',
     'export.modeDialog': '另存为弹窗',
     'export.modeDirect': '直接保存',
+    'plan.notFound': '未找到指定的方案计划记录',
+    'plan.artifactNotFound': '方案工件文件不存在: {0}',
+    'plan.exportSingleSuccess': '已成功另存方案 [{0}] 至: {1}',
+    'plan.exportAllSuccess': '已成功导出 {0} 个方案工件至: {1}',
     'report.title': '  导出报告 (EXPORT REPORT)',
     'report.time': '时间',
     'report.format': '格式',
@@ -75,6 +80,7 @@ export const messages: Record<Language, Record<string, string>> = {
     'dialog.selectExportFolder': 'Select Export Directory',
     'dialog.save': 'Save',
     'dialog.saveTitle': 'Save Conversation Export ({0})',
+    'dialog.savePlanTitle': 'Save Plan Document ({0})',
     'filter.json': 'JSON Data (*.json)',
     'filter.markdown': 'Markdown Document (*.md)',
     'discovery.waiting': 'Waiting for LanguageServer discovery to complete...',
@@ -90,6 +96,10 @@ export const messages: Record<Language, Record<string, string>> = {
     'export.modeTitle': 'Single Export Mode',
     'export.modeDialog': 'Save Dialog',
     'export.modeDirect': 'Direct Export',
+    'plan.notFound': 'Specified plan item not found',
+    'plan.artifactNotFound': 'Plan artifact file does not exist: {0}',
+    'plan.exportSingleSuccess': 'Successfully saved plan [{0}] to: {1}',
+    'plan.exportAllSuccess': 'Successfully exported {0} plan artifacts to: {1}',
     'report.title': '  EXPORT REPORT',
     'report.time': 'Time',
     'report.format': 'Format',
@@ -104,45 +114,48 @@ export const messages: Record<Language, Record<string, string>> = {
     'report.listHeader': '  Exported List',
     'report.steps': 'Steps',
     'report.project': 'Project',
-    'report.uncategorized': 'Uncategorized Project',
+    'report.uncategorized': 'Uncategorized',
     'report.noWorkspace': 'No Workspace',
     'report.unknown': 'Unknown',
-    'report.failedTag': ' [Failed]',
+    'report.failedTag': ' [FAILED]',
   },
 };
 
 /**
- * 获取当前配置的语言代码
- *
- * @returns 'zh-CN' 或 'en'
+ * 翻译指定键名的国际化文本
  */
-export function getCurrentLanguage(): Language {
-  const config = vscode.workspace.getConfiguration('aghistory');
-  const lang = config.get<string>('language', DEFAULT_LANGUAGE);
-  if (lang === 'en' || lang === 'zh-CN') {
-    return lang;
-  }
-  return DEFAULT_LANGUAGE;
-}
-
-/**
- * 多语言翻译函数
- *
- * @param key 词条键名
- * @param lang 目标语言，默认获取当前配置语言
- * @param params 替换占位符 {0}, {1}, {2}... 的参数
- * @returns 翻译后的格式化字符串
- */
-export function t(key: string, lang?: Language, ...params: (string | number)[]): string {
-  const currentLang = lang || getCurrentLanguage();
-  const dict = messages[currentLang] || messages[DEFAULT_LANGUAGE];
+export function t(key: string, langOverride?: Language, ...args: Array<string | number>): string {
+  const lang = langOverride || getCurrentLanguage();
+  const dict = messages[lang] || messages[DEFAULT_LANGUAGE];
   let text = dict[key] || messages[DEFAULT_LANGUAGE][key] || key;
 
-  if (params && params.length > 0) {
-    params.forEach((param, index) => {
-      text = text.replace(new RegExp(`\\{${index}\\}`, 'g'), String(param));
+  if (args.length > 0) {
+    args.forEach((val, idx) => {
+      text = text.replace(new RegExp(`\\{${idx}\\}`, 'g'), String(val));
     });
   }
 
   return text;
+}
+
+/**
+ * 获取当前用户配置或环境偏好的语言代码
+ */
+export function getCurrentLanguage(): Language {
+  try {
+    const config = vscode.workspace.getConfiguration('aghistory');
+    const configured = config.get<string>('language');
+    if (configured === 'zh-CN' || configured === 'en') {
+      return configured as Language;
+    }
+  } catch {
+    // 读取配置失败时降级
+  }
+
+  // 降级为 VS Code 界面当前语言检测
+  const vscodeLocale = vscode.env.language.toLowerCase();
+  if (vscodeLocale.startsWith('zh')) {
+    return 'zh-CN';
+  }
+  return 'en';
 }

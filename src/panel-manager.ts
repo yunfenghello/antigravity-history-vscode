@@ -18,6 +18,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as child_process from 'child_process';
 import { discoverAndListAll, getTrajectorySteps, getLiveWorkingEndpoints, TrajectorySummary, LsEndpoint } from './ls-client.js';
+import { scanBrainPlans, exportSingleArtifact, exportAllArtifactsForPlan, PlanItem } from './plan-service.js';
 import { recoverUnindexed, getCandidateConvDirs, getConversationsDir, scanDiskConversations } from './recovery.js';
 import { readCache, writeCache, pruneCache } from './cache.js';
 import { parseSteps, FieldLevel } from './parser.js';
@@ -37,6 +38,7 @@ let cachedEndpointMap: Record<string, { port: number; csrf: string; appDataDir?:
 let cachedConversations: Record<string, TrajectorySummary> = {};
 let detectedAppDataDirs: string[] = [];
 let availableEndpoints: LsEndpoint[] = [];
+let cachedPlans: PlanItem[] = [];
 
 /**
  * 标准化本地文件系统路径
@@ -683,6 +685,135 @@ async function handleExportAll(): Promise<void> {
 
 // 辅助工具方法
 
+
+
+/**
+ * 刷新并向前端推送脑图方案计划列表
+ */
+function handleRefreshPlans(): void {
+  try {
+    cachedPlans = scanBrainPlans();
+    postMessage({ command: 'setPlans', data: cachedPlans });
+  } catch (e) {
+    postMessage({ command: 'error', text: `方案计划扫描失败: ${e}` });
+  }
+}
+
+/**
+ * 单个方案计划工件另存为（弹出 SaveDialog，定位项目工作区）
+ */
+async function handleExportPlanSingle(planId: string, fileName?: string): Promise<void> {
+  const plan = cachedPlans.find((p) => p.id === planId);
+  if (!plan) {
+    vscode.window.showErrorMessage(t('plan.notFound'));
+    return;
+  }
+
+  // 默认定位该方案关联的项目工作区根目录
+  let defaultDir = '';
+  if (plan.workspacePath && fs.existsSync(plan.workspacePath)) {
+    defaultDir = plan.workspacePath;
+  } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+    defaultDir = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  } else {
+    const config = vscode.workspace.getConfiguration('aghistory');
+    defaultDir = resolveExportPath(config.get<string>('exportPath', './antigravity_export'));
+  }
+
+  // 查找源工件文件
+  const targetFileName = fileName || 'implementation_plan.md';
+  const artifact = plan.artifacts.find((a) => a.fileName === targetFileName) || plan.artifacts[0];
+  if (!artifact || !fs.existsSync(artifact.filePath)) {
+    vscode.window.showErrorMessage(t('plan.artifactNotFound', undefined, targetFileName));
+    return;
+  }
+
+  const cleanTitle = safeFilename(plan.title);
+  let defaultSaveName = `${cleanTitle}.md`;
+  if (targetFileName === 'task.md') {
+    defaultSaveName = `${cleanTitle}_任务清单.md`;
+  } else if (targetFileName === 'walkthrough.md') {
+    defaultSaveName = `${cleanTitle}_变更报告.md`;
+  }
+
+  const defaultUri = vscode.Uri.file(path.join(defaultDir, defaultSaveName));
+  const saveUri = await vscode.window.showSaveDialog({
+    defaultUri,
+    filters: { [t('filter.markdown')]: ['md'] },
+    saveLabel: t('dialog.save'),
+    title: t('dialog.savePlanTitle', undefined, artifact.label),
+  });
+
+  if (!saveUri) {
+    return;
+  }
+
+  const destPath = saveUri.fsPath;
+  const ok = exportSingleArtifact(artifact.filePath, destPath);
+  if (ok) {
+    const choice = await vscode.window.showInformationMessage(
+      t('plan.exportSingleSuccess', undefined, artifact.label, destPath),
+      t('export.openFile'),
+      t('export.openContainingFolder'),
+    );
+    if (choice === t('export.openFile')) {
+      const doc = await vscode.workspace.openTextDocument(saveUri);
+      await vscode.window.showTextDocument(doc);
+    } else if (choice === t('export.openContainingFolder')) {
+      await openPathInExplorer(path.dirname(destPath));
+    }
+  } else {
+    vscode.window.showErrorMessage(`导出方案文件失败: ${destPath}`);
+  }
+}
+
+/**
+ * 批量导出指定方案下的全部工件文件（弹出文件夹选择器）
+ */
+async function handleExportPlanAll(planId: string): Promise<void> {
+  const plan = cachedPlans.find((p) => p.id === planId);
+  if (!plan) {
+    vscode.window.showErrorMessage(t('plan.notFound'));
+    return;
+  }
+
+  let defaultDir = '';
+  if (plan.workspacePath && fs.existsSync(plan.workspacePath)) {
+    defaultDir = plan.workspacePath;
+  } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+    defaultDir = vscode.workspace.workspaceFolders[0].uri.fsPath;
+  } else {
+    const config = vscode.workspace.getConfiguration('aghistory');
+    defaultDir = resolveExportPath(config.get<string>('exportPath', './antigravity_export'));
+  }
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFolders: true,
+    canSelectFiles: false,
+    canSelectMany: false,
+    defaultUri: vscode.Uri.file(defaultDir),
+    openLabel: t('dialog.selectExportFolder'),
+  });
+
+  if (!picked || !picked[0]) {
+    return;
+  }
+
+  const targetDir = picked[0].fsPath;
+  const result = exportAllArtifactsForPlan(plan, targetDir);
+  if (result.successCount > 0) {
+    const choice = await vscode.window.showInformationMessage(
+      t('plan.exportAllSuccess', undefined, result.successCount, result.targetDir),
+      t('export.openFolder'),
+    );
+    if (choice === t('export.openFolder')) {
+      await openPathInExplorer(result.targetDir);
+    }
+  } else {
+    vscode.window.showErrorMessage(`导出工件失败，目标路径: ${targetDir}`);
+  }
+}
+
 function postMessage(msg: Record<string, unknown>): void {
   currentPanel?.webview.postMessage(msg);
 }
@@ -717,6 +848,12 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
   <title>Antigravity History</title>
 </head>
 <body>
+  <div class="view-nav">
+    <div class="view-nav-tabs">
+      <button class="view-nav-btn active" id="tab-conversations">对话历史</button>
+      <button class="view-nav-btn" id="tab-plans">方案计划</button>
+    </div>
+  </div>
   <div class="top-bar">
     <input type="text" class="search-input" id="search-input" placeholder="搜索会话...">
     <div class="segmented-control">
