@@ -404,7 +404,11 @@
       const cascadeId = actionBtn.getAttribute('data-id');
       const planId = actionBtn.getAttribute('data-plan-id');
 
-      if (action === 'exportMd') {
+      if (action === 'refresh') {
+        showLoading();
+        vscode.postMessage({ command: 'refresh' });
+        vscode.postMessage({ command: 'refreshPlans' });
+      } else if (action === 'exportMd') {
         vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
         showToast(t('preparingExportMd'));
       } else if (action === 'exportJson') {
@@ -426,7 +430,7 @@
       } else if (action === 'openPlanFolder') {
         const folderPath = actionBtn.getAttribute('data-path');
         if (folderPath) {
-          vscode.postMessage({ command: 'openPlanFolder', path: folderPath });
+          vscode.postMessage({ command: 'openInExplorer', path: folderPath });
         }
       }
     }
@@ -457,7 +461,7 @@
         break;
 
       case 'setPlans':
-        plans = msg.data || [];
+        plans = Array.isArray(msg.data) ? msg.data : [];
         if (activeTab === 'plans') {
           renderPlansList();
         }
@@ -615,12 +619,12 @@
     const wsDisplay = toWinPath(stripFileUri(wsPath));
     const wsTooltip = t('openFolderTooltip', wsDisplay);
     const wsHtml = wsPath
-      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(wsPath)}" title="${esc(wsTooltip)}">📁 ${esc(wsDisplay)}</div>`
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(wsPath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
       : '';
 
     const convDataTooltip = t('openConvDataTooltip', convDataDir ? toWinPath(convDataDir) : '');
     const convFileHtml = convDataDir
-      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(convDataDir)}" title="${esc(convDataTooltip)}">💾 ${esc(cascadeId)}</div>`
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(convDataDir)}" title="${esc(convDataTooltip)}"><span class="tag-label">[存储]</span> ${esc(cascadeId)}</div>`
       : '';
 
     return `
@@ -685,8 +689,8 @@
     const wsTooltip = t('openFolderTooltip', wsDisplay);
 
     const wsHtml = plan.workspacePath
-      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}">📁 ${esc(wsDisplay)}</div>`
-      : `<div class="conv-workspace" style="color:var(--vscode-descriptionForeground)">📁 ${esc(wsDisplay)}</div>`;
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
+      : `<div class="conv-workspace" style="color:var(--vscode-descriptionForeground)"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`;
 
     // 渲染工件徽章
     let badgesHtml = '<div class="artifact-badge-group">';
@@ -698,7 +702,7 @@
 
     return `
       <div class="conv-card plan-card" data-plan-id="${esc(plan.id)}">
-        <div class="conv-icon"><span class="status-dot active">📋</span></div>
+        <div class="conv-icon"><span class="status-dot active">●</span></div>
         <div class="conv-info">
           <div class="conv-title" style="font-weight:600;font-size:14px;" title="${esc(title)}">${esc(title)}</div>
           <div class="conv-meta">${time} · ID: ${esc(plan.id.slice(0, 8))}...</div>
@@ -839,7 +843,7 @@
     return `<div class="empty-state">
       <div class="empty-state-title">${esc(t('emptyTitle'))}</div>
       <div class="empty-state-desc">${esc(t('emptyDesc'))}</div>
-      <button class="btn btn-primary" onclick="document.getElementById('btn-refresh').click()">${esc(t('refresh'))}</button>
+      <button class="btn btn-primary" data-action="refresh">${esc(t('refresh'))}</button>
     </div>`;
   }
 
@@ -847,7 +851,7 @@
     return `<div class="empty-state">
       <div class="empty-state-title">${esc(t('emptyPlanTitle'))}</div>
       <div class="empty-state-desc">${esc(t('emptyPlanDesc'))}</div>
-      <button class="btn btn-primary" onclick="document.getElementById('btn-refresh').click()">${esc(t('refresh'))}</button>
+      <button class="btn btn-primary" data-action="refresh">${esc(t('refresh'))}</button>
     </div>`;
   }
 
@@ -866,7 +870,7 @@
     listContainer.innerHTML = `<div class="empty-state">
       <div class="empty-state-title">${esc(t('errorTitle'))}</div>
       <div class="empty-state-desc">${esc(text)}</div>
-      <button class="btn btn-primary" onclick="document.getElementById('btn-refresh').click()">${esc(t('retryBtn'))}</button>
+      <button class="btn btn-primary" data-action="refresh">${esc(t('retryBtn'))}</button>
     </div>`;
   }
 

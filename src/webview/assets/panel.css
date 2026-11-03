@@ -110,6 +110,26 @@ body {
   background: var(--vscode-button-hoverBackground, #1177bb);
 }
 
+.btn-secondary {
+  background: var(--vscode-button-secondaryBackground, #2d2d30);
+  color: var(--vscode-button-secondaryForeground, #cccccc);
+  border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.15));
+}
+
+.btn-secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #3e3e42);
+  color: var(--vscode-foreground, #ffffff);
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.btn-sm {
+  height: 20px;
+  line-height: 18px;
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 3px;
+}
+
 /* ── Field Level Select ── */
 .field-level-select {
   padding: 5px 8px;
@@ -140,37 +160,60 @@ body {
 
 /* ── Export Path Bar ── */
 .export-path-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #888);
   margin-bottom: 12px;
+  padding: 2px 0;
 }
 
-.export-path-link {
-  cursor: pointer;
+.export-path-label {
+  flex-shrink: 0;
+}
+
+.export-path-value {
   color: var(--vscode-textLink-foreground, #3794ff);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-}
-
-.export-path-link:hover {
-  color: var(--vscode-textLink-activeForeground, #3794ff);
-  text-decoration-style: solid;
-}
-
-.export-path-btn {
-  font-size: 10px;
-  padding: 1px 6px;
-  border: 1px solid var(--vscode-input-border, #3c3c3c);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
   cursor: pointer;
-  margin-left: 4px;
+  text-decoration: underline dotted;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
 }
 
-.export-path-btn:hover {
-  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
-  color: var(--vscode-foreground);
+.export-path-value:hover {
+  color: var(--vscode-textLink-activeForeground, #3794ff);
+  text-decoration: underline solid;
+}
+
+.export-path-bar .btn,
+.export-path-bar button {
+  height: 20px;
+  line-height: 18px;
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, #2d2d30);
+  color: var(--vscode-button-secondaryForeground, #cccccc);
+  border: 1px solid var(--vscode-input-border, rgba(255, 255, 255, 0.15));
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.export-path-bar .btn:hover,
+.export-path-bar button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #3e3e42);
+  color: var(--vscode-foreground, #ffffff);
+  border-color: var(--vscode-focusBorder, #007fd4);
+  opacity: 1;
 }
 
 /* ── Recover Banner ── */
@@ -506,4 +549,12 @@ body {
   background: rgba(14, 99, 156, 0.2);
   border-color: #0e639c;
   color: #70b8ff;
+}
+
+
+.tag-label {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground, #888);
+  margin-right: 4px;
+  display: inline-block;
 }

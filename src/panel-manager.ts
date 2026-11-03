@@ -128,6 +128,7 @@ export function openPanel(context: vscode.ExtensionContext): void {
   if (currentPanel) {
     currentPanel.reveal(vscode.ViewColumn.One);
     // 主动触发一次刷新确保数据最新
+    handleRefreshPlans();
     handleRefresh();
     return;
   }
@@ -155,6 +156,15 @@ export function openPanel(context: vscode.ExtensionContext): void {
   currentPanel.webview.onDidReceiveMessage(
     async (message) => {
       switch (message.command) {
+        case 'refreshPlans':
+          handleRefreshPlans();
+          break;
+        case 'exportPlanSingle':
+          await handleExportPlanSingle(message.planId, message.fileName);
+          break;
+        case 'exportPlanAll':
+          await handleExportPlanAll(message.planId);
+          break;
         case 'refresh':
           await handleRefresh();
           break;
@@ -174,6 +184,7 @@ export function openPanel(context: vscode.ExtensionContext): void {
             vscode.window.showInformationMessage(t('common.copiedToClipboard'));
           }
           break;
+        case 'openPlanFolder':
         case 'openInExplorer': {
           if (message.path) {
             await openPathInExplorer(message.path);
@@ -236,6 +247,10 @@ export function openPanel(context: vscode.ExtensionContext): void {
     undefined,
     context.subscriptions,
   );
+
+  // 打开面板时立即拉取方案计划与对话列表
+  handleRefreshPlans();
+  handleRefresh();
 }
 
 /**
@@ -271,6 +286,7 @@ export function getConversationWorkspace(cascadeId: string): string | null {
  */
 async function handleRefresh(): Promise<void> {
   try {
+    handleRefreshPlans();
     const primaryConvDir = getConvDir();
 
     // 步骤 0：读取持久化本地缓存

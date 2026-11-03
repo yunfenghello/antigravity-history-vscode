@@ -2,6 +2,22 @@
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
 
+## [0.3.0] - 2026-11-03
+
+### Fixed
+- **方案计划列表无法加载彻底修复**：
+  - 修复后端消息分发器中遗漏 refreshPlans、exportPlanSingle、exportPlanAll 处理分支的缺陷。
+  - 解决打包工具因缺少公开显式调用将脑图扫描模块误判为 dead-code 剥离的问题，方案数据完整打包。
+  - 彻底打通双向通信管道，面板启动、切换标签及全局刷新时均同步调度 handleRefreshPlans()，秒级呈现本地全部方案计划。
+  - 解决在 CSP 安全策略下空状态刷新按钮被拦截的隐患，全量升级为安全高效的事件委托。
+
+### Improved
+- **导出路径栏操作按钮视觉精致化重构**：
+  - 重写 .export-path-bar .btn 与 .btn-secondary.btn-sm 样式规范，消除刺眼的巨大白色高亮块。
+  - 采用高度 20px、字号 11px、深色微边框的内敛微型按钮设计，与路径文字视觉高度融合统一。
+  - 切换至【方案计划】标签页时自动静默隐藏进度条横幅，维持方案浏览界面极简纯粹。
+  - 全面审查并清除残留表情符号（Emoji），符合高严肃性企业级代码与注释规范。
+
 ## [0.2.9] - 2026-11-03
 
 ### Fixed
