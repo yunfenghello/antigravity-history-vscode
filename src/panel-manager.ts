@@ -339,6 +339,13 @@ async function handleRefresh(): Promise<void> {
       cachedConversations[id] = { ...(cachedConversations[id] || {}), ...info };
     }
 
+    // 步骤 6：过滤掉无有效时间、无标题且步骤未定义的纯占位幽灵会话
+    for (const [id, info] of Object.entries(cachedConversations)) {
+      if (!info.summary && info.stepCount === undefined && !info.lastModifiedTime && (!info.workspaces || info.workspaces.length === 0)) {
+        delete cachedConversations[id];
+      }
+    }
+
     // 同步当前语言与配置状态至 Webview
     const currentLang = getCurrentLanguage();
     postMessage({ command: 'setLanguage', language: currentLang });
