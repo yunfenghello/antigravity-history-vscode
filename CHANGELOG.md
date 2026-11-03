@@ -2,6 +2,11 @@
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
 
+## [0.3.2] - 2026-11-03
+
+### Changed
+- **版本号同步与全平台发布适配**：同步 Open VSX 与 GitHub 发布版本至 0.3.2。
+
 ## [0.3.1] - 2026-11-03
 
 ### Added
