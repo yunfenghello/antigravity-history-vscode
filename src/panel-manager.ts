@@ -692,7 +692,7 @@ async function handleExportAll(): Promise<void> {
  */
 function handleRefreshPlans(): void {
   try {
-    cachedPlans = scanBrainPlans();
+    cachedPlans = scanBrainPlans(detectedAppDataDirs);
     postMessage({ command: 'setPlans', data: cachedPlans });
   } catch (e) {
     postMessage({ command: 'error', text: `方案计划扫描失败: ${e}` });

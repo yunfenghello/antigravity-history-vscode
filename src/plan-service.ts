@@ -2,9 +2,9 @@
  * 脑图方案工件扫描与独立导出服务模块
  *
  * 核心功能：
- * - 扫描本地脑图工件目录 (~/.gemini/antigravity/brain 与 antigravity-ide/brain)
+ * - 扫描本地脑图工件目录 (~/.gemini/antigravity/brain、antigravity-ide/brain 等)
  * - 提取实施计划 (implementation_plan.md)、任务清单 (task.md) 与变更报告 (walkthrough.md)
- * - 自动解析方案大标题与会话关联的工作区物理路径
+ * - 自动解析方案大标题与会话关联的工作区物理路径，执行 URL 中文解码
  * - 支持单件计划另存为与全套工件一键导出到指定项目工作区目录
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
@@ -31,24 +31,33 @@ export interface PlanItem {
 }
 
 /**
- * 获取所有可能的脑图工件根目录列表
+ * 获取所有可能的脑图工件根目录列表（兼容动态探测与系统历史路径）
  */
-export function getBrainCandidateDirs(): string[] {
+export function getBrainCandidateDirs(customDirs: string[] = []): string[] {
   const home = os.homedir();
-  const dirs: string[] = [];
+  const dirSet = new Set<string>();
 
-  const paths = [
-    path.join(home, '.gemini', 'antigravity', 'brain'),
-    path.join(home, '.gemini', 'antigravity-ide', 'brain'),
-  ];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) {
-      dirs.push(p);
+  for (const name of customDirs) {
+    if (!name || typeof name !== 'string') { continue; }
+    if (path.isAbsolute(name)) {
+      dirSet.add(path.join(name, 'brain'));
+    } else {
+      dirSet.add(path.join(home, '.gemini', name, 'brain'));
     }
   }
 
-  return dirs;
+  dirSet.add(path.join(home, '.gemini', 'antigravity', 'brain'));
+  dirSet.add(path.join(home, '.gemini', 'antigravity-ide', 'brain'));
+  dirSet.add(path.join(home, '.gemini', 'antigravity-backup', 'brain'));
+
+  const validDirs: string[] = [];
+  for (const p of dirSet) {
+    if (fs.existsSync(p)) {
+      validDirs.push(p);
+    }
+  }
+
+  return validDirs;
 }
 
 /**
@@ -63,7 +72,6 @@ function extractMarkdownTitle(filePath: string): string {
       const line = rawLine.trim();
       if (line.startsWith('# ')) {
         const title = line.replace(/^#\s+/, '').trim();
-        // 清洗多余符号
         return title.replace(/[`*#]/g, '').trim();
       }
     }
@@ -71,6 +79,26 @@ function extractMarkdownTitle(filePath: string): string {
     // 读取异常安全兜底
   }
   return '';
+}
+
+/**
+ * 清洗并规范化项目工作区物理路径（统一解码 URL 编码）
+ */
+function cleanWorkspacePath(rawPath: string): string {
+  if (!rawPath) return '';
+  let p = rawPath.trim();
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // 解码异常保留原串
+  }
+  if (/^file:\/\/\//i.test(p)) {
+    p = p.replace(/^file:\/\/\//i, '');
+  } else if (/^file:\/\//i.test(p)) {
+    p = p.replace(/^file:\/\//i, '');
+  }
+  p = p.replace(/^[\\\/]([a-zA-Z]:)/, '$1');
+  return path.normalize(p);
 }
 
 /**
@@ -89,20 +117,19 @@ function extractWorkspaceFromTranscript(brainSubDir: string): string | undefined
       // 匹配 @[路径]
       const atMatch = line.match(/@\[([a-zA-Z]:[\\\/][^\]]+)\]/);
       if (atMatch && atMatch[1]) {
-        return path.normalize(atMatch[1]);
+        return cleanWorkspacePath(atMatch[1]);
       }
 
       // 匹配 file:/// 路径
       const fileUriMatch = line.match(/file:\/\/\/([a-zA-Z]:[^\s"'\\`]+)/i);
       if (fileUriMatch && fileUriMatch[1]) {
-        let p = decodeURIComponent(fileUriMatch[1]);
-        return path.normalize(p);
+        return cleanWorkspacePath(fileUriMatch[1]);
       }
 
       // 匹配 Command Working Directory 或 Workspace
       const wsMatch = line.match(/(?:Command Working Directory|Workspace):\s*([a-zA-Z]:[^\r\n"']+)/i);
       if (wsMatch && wsMatch[1]) {
-        return path.normalize(wsMatch[1].trim());
+        return cleanWorkspacePath(wsMatch[1].trim());
       }
     }
   } catch {
@@ -114,8 +141,8 @@ function extractWorkspaceFromTranscript(brainSubDir: string): string | undefined
 /**
  * 扫描全部脑图目录，获取所有包含工件的方案计划列表
  */
-export function scanBrainPlans(): PlanItem[] {
-  const rootDirs = getBrainCandidateDirs();
+export function scanBrainPlans(customDirs: string[] = []): PlanItem[] {
+  const rootDirs = getBrainCandidateDirs(customDirs);
   const planMap = new Map<string, PlanItem>();
 
   const standardArtifacts: Array<{ name: string; label: string }> = [
@@ -253,7 +280,6 @@ export function exportAllArtifactsForPlan(
 ): { successCount: number; targetDir: string } {
   let count = 0;
   try {
-    // 自动为该计划建立专属文件夹
     const safeTitle = planItem.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
     const subFolderName = `计划方案_${safeTitle}_${planItem.id.slice(0, 8)}`;
     const fullTargetDir = path.join(targetDirectory, subFolderName);

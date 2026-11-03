@@ -270,13 +270,14 @@
     } else {
       tabPlansBtn?.classList.add('active');
       tabConversationsBtn?.classList.remove('active');
-      // 方案计划视图隐藏部分对话专用的配置选择框
+      hideRecoverBanner();
       if (exportAllBtn) exportAllBtn.style.display = 'none';
       if (exportStrategySelect) exportStrategySelect.style.display = 'none';
       if (singleExportModeSelect) singleExportModeSelect.style.display = 'none';
       if (fieldLevelSelect) fieldLevelSelect.style.display = 'none';
       const segs = document.querySelectorAll('.segmented-control');
       segs.forEach((s) => s.style.display = 'none');
+      vscode.postMessage({ command: 'refreshPlans' });
       renderPlansList();
     }
     updateStaticTexts();
@@ -481,6 +482,9 @@
 
       case 'recoverProgress':
         showRecoverBanner(msg.done, msg.total);
+        if (msg.done >= msg.total) {
+          setTimeout(hideRecoverBanner, 500);
+        }
         break;
 
       case 'recoverDone':
@@ -881,11 +885,19 @@
   }
 
   function stripFileUri(uri) {
-    return (uri || '').replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+    if (!uri) return '';
+    let p = (uri || '').replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+    try {
+      p = decodeURIComponent(p);
+    } catch {}
+    return p;
   }
 
   function toWinPath(p) {
     let out = (p || '').replace(/\//g, '\\');
+    try {
+      out = decodeURIComponent(out);
+    } catch {}
     const m = out.match(/^\\?([a-zA-Z]):(.*)/);
     if (m) {
       out = m[1].toUpperCase() + ':' + m[2];
@@ -896,6 +908,6 @@
   // ── 启动初始化 ──
   updateStaticTexts();
   showLoading();
-  vscode.postMessage({ command: 'refresh' });
   vscode.postMessage({ command: 'refreshPlans' });
+  vscode.postMessage({ command: 'refresh' });
 })();
