@@ -1,16 +1,20 @@
 /**
- * 语言服务进程探测与端口扫描模块
+ * 语言服务进程探测与端口扫描模块 (高性能全异步非阻塞架构)
  *
  * 核心功能：
- * - 自动探测运行中的 Antigravity 语言服务与 agy hub 实例
+ * - 异步非阻塞自动探测运行中的 Antigravity 语言服务与 agy hub 实例 (零主线程冻结)
  * - 从进程命令行参数提取 CSRF Token、hub-port 与 app_data_dir
- * - 扫描进程监听的本地端口并支持自适应 HTTP/HTTPS 协议
+ * - 单次并发批量扫描监听端口 (Batch Port Mapping)，杜绝多进程重复扫描全系统网络
+ * - 自适应支持 HTTP 与 HTTPS 双协议通信
  *
- * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import * as os from 'os';
+
+const execAsync = promisify(exec);
 
 export interface LsProcess {
   pid: number;
@@ -29,29 +33,32 @@ export interface LsEndpoint {
 }
 
 /**
- * 发现所有正在运行的 LanguageServer / agy 进程
+ * 异步发现所有正在运行的 LanguageServer / agy 进程 (零阻塞)
  */
-export function discoverLanguageServers(): LsProcess[] {
+export async function discoverLanguageServers(): Promise<LsProcess[]> {
   const system = os.platform();
-  if (system === 'win32') {
-    return discoverWindows();
-  } else if (system === 'darwin') {
-    return discoverMacOS();
-  } else if (system === 'linux') {
-    return discoverLinux();
+  try {
+    if (system === 'win32') {
+      return await discoverWindowsAsync();
+    } else if (system === 'darwin') {
+      return await discoverMacOSAsync();
+    } else if (system === 'linux') {
+      return await discoverLinuxAsync();
+    }
+  } catch (err) {
+    console.warn('[AG] 进程探测异常已安全兜底:', err);
   }
   return [];
 }
 
 /**
- * Windows 平台：探测 agy.exe 与 language_server 进程
+ * Windows 平台：异步非阻塞探测 agy.exe 与 language_server 进程
  */
-function discoverWindows(): LsProcess[] {
+async function discoverWindowsAsync(): Promise<LsProcess[]> {
   const servers: LsProcess[] = [];
   try {
-    // 使用 wmic 快速获取所有进程信息，避免 powershell 子进程启动慢
-    const stdout = execSync('wmic process get processid,caption,commandline /format:csv', {
-      timeout: 8000,
+    const { stdout } = await execAsync('wmic process get processid,caption,commandline /format:csv', {
+      timeout: 6000,
       encoding: 'utf-8',
       windowsHide: true,
       maxBuffer: 10 * 1024 * 1024,
@@ -62,13 +69,11 @@ function discoverWindows(): LsProcess[] {
       if (!line) { continue; }
 
       const lower = line.toLowerCase();
-      // 匹配 agy.exe 或 language_server 或命令行包含 csrf_token 的进程
       if (
         lower.includes('agy.exe') ||
         lower.includes('language_server') ||
         lower.includes('csrf_token')
       ) {
-        // CSV 格式: Node,Caption,CommandLine,ProcessId
         const parts = line.split(',');
         if (parts.length >= 4) {
           const pidStr = parts[parts.length - 1].trim();
@@ -92,8 +97,8 @@ function discoverWindows(): LsProcess[] {
       const cmd =
         "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*agy*' -or $_.Name -like '*language_server*' -or $_.CommandLine -like '*csrf_token*' } | " +
         'Select-Object ProcessId, CommandLine | ConvertTo-Json';
-      const stdout = execSync(`powershell -Command "${cmd}"`, {
-        timeout: 8000,
+      const { stdout } = await execAsync(`powershell -Command "${cmd}"`, {
+        timeout: 6000,
         encoding: 'utf-8',
         windowsHide: true,
       });
@@ -112,39 +117,40 @@ function discoverWindows(): LsProcess[] {
         }
       }
     } catch {
-      // 备用查询失败时安全兜底
+      // 备用查询失败安全兜底
     }
   }
   return servers;
 }
 
 /**
- * macOS 平台：通过 pgrep + ps 查询进程
+ * macOS 平台：异步通过 pgrep + ps 查询进程
  */
-function discoverMacOS(): LsProcess[] {
+async function discoverMacOSAsync(): Promise<LsProcess[]> {
   const servers: LsProcess[] = [];
   try {
-    const pids = execSync('pgrep -f "agy|language_server"', {
+    const { stdout: pidsOut } = await execAsync('pgrep -f "agy|language_server"', {
       encoding: 'utf-8',
-      timeout: 5000,
-    }).trim().split('\n').filter(Boolean);
+      timeout: 4000,
+    });
+    const pids = pidsOut.trim().split('\n').filter(Boolean);
 
     for (const pidStr of pids) {
       const pid = parseInt(pidStr, 10);
       if (isNaN(pid)) { continue; }
       try {
-        const cmdLine = execSync(`ps -p ${pid} -o args=`, {
+        const { stdout: cmdLine } = await execAsync(`ps -p ${pid} -o args=`, {
           encoding: 'utf-8',
-          timeout: 3000,
-        }).trim();
-        const csrf = extractCsrf(cmdLine);
+          timeout: 2000,
+        });
+        const csrf = extractCsrf(cmdLine.trim());
         if (csrf) {
-          const appDataDir = extractAppDataDir(cmdLine);
-          const directPort = extractDirectPort(cmdLine);
-          servers.push({ pid, csrf, cmd: cmdLine, appDataDir, directPort });
+          const appDataDir = extractAppDataDir(cmdLine.trim());
+          const directPort = extractDirectPort(cmdLine.trim());
+          servers.push({ pid, csrf, cmd: cmdLine.trim(), appDataDir, directPort });
         }
       } catch {
-        // 忽略单进程获取异常
+        // 忽略单进程异常
       }
     }
   } catch {
@@ -154,32 +160,33 @@ function discoverMacOS(): LsProcess[] {
 }
 
 /**
- * Linux 平台：通过 pgrep + ps 查询进程
+ * Linux 平台：异步通过 pgrep + ps 查询进程
  */
-function discoverLinux(): LsProcess[] {
+async function discoverLinuxAsync(): Promise<LsProcess[]> {
   const servers: LsProcess[] = [];
   try {
-    const pids = execSync('pgrep -f "agy|language_server"', {
+    const { stdout: pidsOut } = await execAsync('pgrep -f "agy|language_server"', {
       encoding: 'utf-8',
-      timeout: 5000,
-    }).trim().split('\n').filter(Boolean);
+      timeout: 4000,
+    });
+    const pids = pidsOut.trim().split('\n').filter(Boolean);
 
     for (const pidStr of pids) {
       const pid = parseInt(pidStr, 10);
       if (isNaN(pid)) { continue; }
       try {
-        const cmdLine = execSync(`ps -p ${pid} -o args=`, {
+        const { stdout: cmdLine } = await execAsync(`ps -p ${pid} -o args=`, {
           encoding: 'utf-8',
-          timeout: 3000,
-        }).trim();
-        const csrf = extractCsrf(cmdLine);
+          timeout: 2000,
+        });
+        const csrf = extractCsrf(cmdLine.trim());
         if (csrf) {
-          const appDataDir = extractAppDataDir(cmdLine);
-          const directPort = extractDirectPort(cmdLine);
-          servers.push({ pid, csrf, cmd: cmdLine, appDataDir, directPort });
+          const appDataDir = extractAppDataDir(cmdLine.trim());
+          const directPort = extractDirectPort(cmdLine.trim());
+          servers.push({ pid, csrf, cmd: cmdLine.trim(), appDataDir, directPort });
         }
       } catch {
-        // 忽略单进程获取异常
+        // 忽略单进程异常
       }
     }
   } catch {
@@ -213,64 +220,88 @@ export function extractDirectPort(cmdLine: string): number | undefined {
 }
 
 /**
- * 查询指定进程正在监听的本地端口列表
+ * 批量高效端口扫描映射 (单次执行 netstat/lsof 并在内存中一次性哈希归组)
+ *
+ * @param servers 所有已发现的语言服务进程列表
+ * @returns Map<PID, 监听端口列表>
  */
-export function findPorts(pid: number, directPort?: number): number[] {
-  const ports: number[] = [];
-  if (directPort && directPort > 0) {
-    ports.push(directPort);
+export async function findPortsForProcesses(servers: LsProcess[]): Promise<Map<number, number[]>> {
+  const result = new Map<number, number[]>();
+  if (!servers || servers.length === 0) {
+    return result;
   }
+
+  // 先提取所有显式 directPort
+  for (const srv of servers) {
+    const list: number[] = [];
+    if (srv.directPort && srv.directPort > 0) {
+      list.push(srv.directPort);
+    }
+    result.set(srv.pid, list);
+  }
+
+  const pidSet = new Set(servers.map((s) => s.pid));
 
   if (os.platform() === 'win32') {
-    const sysPorts = findPortsWindows(pid);
-    for (const p of sysPorts) {
-      if (!ports.includes(p)) { ports.push(p); }
+    try {
+      const { stdout } = await execAsync('netstat -ano', {
+        encoding: 'utf-8',
+        timeout: 4000,
+        windowsHide: true,
+      });
+
+      for (const line of stdout.split('\n')) {
+        if (!line.includes('LISTENING')) continue;
+        const m = line.match(/127\.0\.0\.1:(\d+)\s+.*?\s+(\d+)\s*$/);
+        if (m) {
+          const port = parseInt(m[1], 10);
+          const pid = parseInt(m[2], 10);
+          if (pidSet.has(pid)) {
+            const list = result.get(pid) || [];
+            if (!list.includes(port)) {
+              list.push(port);
+              result.set(pid, list);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[AG] Windows 单次 netstat 端口扫描异常:', e);
     }
   } else {
-    const sysPorts = findPortsUnix(pid);
-    for (const p of sysPorts) {
-      if (!ports.includes(p)) { ports.push(p); }
-    }
-  }
-  return ports;
-}
-
-function findPortsWindows(pid: number): number[] {
-  const ports: number[] = [];
-  try {
-    const stdout = execSync('netstat -ano', {
-      encoding: 'utf-8',
-      timeout: 6000,
-      windowsHide: true,
-    });
-    const pidStr = String(pid);
-    for (const line of stdout.split('\n')) {
-      if (line.includes('LISTENING') && line.includes(pidStr)) {
-        const m = line.match(/127\.0\.0\.1:(\d+)/);
-        if (m) { ports.push(parseInt(m[1], 10)); }
+    // Unix 平台批量扫描
+    for (const srv of servers) {
+      try {
+        const { stdout } = await execAsync(`lsof -p ${srv.pid} -i -P -n`, {
+          encoding: 'utf-8',
+          timeout: 3000,
+        });
+        const list = result.get(srv.pid) || [];
+        for (const line of stdout.split('\n')) {
+          if (line.includes('LISTEN')) {
+            const m = line.match(/:(\d+)\s+\(LISTEN\)/);
+            if (m) {
+              const port = parseInt(m[1], 10);
+              if (!list.includes(port)) {
+                list.push(port);
+              }
+            }
+          }
+        }
+        result.set(srv.pid, list);
+      } catch {
+        // 单个 lsof 异常安全忽略
       }
     }
-  } catch {
-    // netstat 执行失败安全处理
   }
-  return ports;
+
+  return result;
 }
 
-function findPortsUnix(pid: number): number[] {
-  const ports: number[] = [];
-  try {
-    const stdout = execSync(`lsof -p ${pid} -i -P -n`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
-    for (const line of stdout.split('\n')) {
-      if (line.includes('LISTEN')) {
-        const m = line.match(/:(\d+)\s+\(LISTEN\)/);
-        if (m) { ports.push(parseInt(m[1], 10)); }
-      }
-    }
-  } catch {
-    // lsof 执行失败安全处理
-  }
-  return ports;
+/**
+ * 异步查询指定进程正在监听的本地端口列表 (单进程兼容接口)
+ */
+export async function findPorts(pid: number, directPort?: number): Promise<number[]> {
+  const map = await findPortsForProcesses([{ pid, csrf: '', cmd: '', directPort }]);
+  return map.get(pid) || [];
 }

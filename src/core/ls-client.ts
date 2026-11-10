@@ -12,7 +12,7 @@
 
 import * as http from 'http';
 import * as https from 'https';
-import { LsEndpoint, LsProcess, discoverLanguageServers, findPorts } from './discovery.js';
+import { LsEndpoint, LsProcess, discoverLanguageServers, findPorts, findPortsForProcesses } from './discovery.js';
 
 export type { LsEndpoint };
 
@@ -161,16 +161,17 @@ export async function getAllTrajectories(
 }
 
 /**
- * 实时动态寻找当前可用且响应正常的端点列表
+ * 实时动态寻找当前可用且响应正常的端点列表 (全异步批处理)
  */
 export async function getLiveWorkingEndpoints(): Promise<LsEndpoint[]> {
-  const servers = discoverLanguageServers();
+  const servers = await discoverLanguageServers();
   const endpoints: LsEndpoint[] = [];
+  const portMap = await findPortsForProcesses(servers);
 
   for (const srv of servers) {
-    const ports = findPorts(srv.pid, srv.directPort);
+    const ports = portMap.get(srv.pid) || [];
     for (const port of ports) {
-      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 4000);
+      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 1500);
       if (result !== null) {
         endpoints.push({
           port,
@@ -188,7 +189,7 @@ export async function getLiveWorkingEndpoints(): Promise<LsEndpoint[]> {
 }
 
 /**
- * 自动发现所有运行中的语言服务实例并汇总会话列表
+ * 自动发现所有运行中的语言服务实例并汇总会话列表 (全异步非阻塞批处理)
  */
 export async function discoverAndListAll(): Promise<{
   conversations: Record<string, TrajectorySummary>;
@@ -196,7 +197,7 @@ export async function discoverAndListAll(): Promise<{
   endpoints: LsEndpoint[];
   appDataDirs: string[];
 }> {
-  const servers = discoverLanguageServers();
+  const servers = await discoverLanguageServers();
   const conversations: Record<string, TrajectorySummary> = {};
   const cascadeToEndpoint: Record<string, { port: number; csrf: string; appDataDir?: string }> = {};
   const endpoints: LsEndpoint[] = [];
@@ -208,13 +209,15 @@ export async function discoverAndListAll(): Promise<{
     }
   }
 
+  const portMap = await findPortsForProcesses(servers);
+
   for (const srv of servers) {
-    const ports = findPorts(srv.pid, srv.directPort);
+    const ports = portMap.get(srv.pid) || [];
     let workingPort: number | null = null;
     let foundSummaries: Record<string, TrajectorySummary> = {};
 
     for (const port of ports) {
-      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 4000);
+      const result = await callApi(port, srv.csrf, 'GetAllCascadeTrajectories', {}, 1500);
       if (result !== null) {
         workingPort = port;
         foundSummaries = (result.trajectorySummaries as Record<string, TrajectorySummary>) || {};

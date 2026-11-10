@@ -108,3 +108,4 @@ console.log('渲染后 listContainer HTML 长度:', listContainerEl.innerHTML.le
 console.log('渲染后 statsBar 文本:', mockDoc.getElementById('stats-bar').textContent);
 console.log('渲染输出截取前 300 字符:');
 console.log(listContainerEl.innerHTML.slice(0, 300));
+

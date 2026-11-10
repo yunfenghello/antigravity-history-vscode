@@ -123,6 +123,8 @@ global.window.addEventListener = (evt, fn) => {
 };
 global.document = mockDoc;
 global.acquireVsCodeApi = () => mockVscode;
+global.requestAnimationFrame = (cb) => { cb(); return 1; };
+global.cancelAnimationFrame = () => {};
 
 // 2. 加载生产环境 panel.js
 const panelJsPath = path.join(__dirname, '..', 'dist', 'webview', 'panel.js');
@@ -249,3 +251,4 @@ console.log(`   [通过] 存在脏数据时列表依然健壮渲染，HTML 长�
 console.log('\n====================================================');
 console.log('     全部严苛仿真测试 100% 通过！质量审计达标！     ');
 console.log('====================================================');
+

@@ -31,21 +31,53 @@ export interface RefreshState {
   availableEndpoints: LsEndpoint[];
   cachedPlans: PlanItem[];
   isBackgroundRefreshing: boolean;
+  lastSentConvDigest?: string;
+  lastSentPlansDigest?: string;
 }
 
 /**
- * 刷新并向前端推送脑图方案计划列表
+ * 计算会话集合轻量哈希指纹，用于过滤冗余刷新推送 (消除高频重绘)
+ */
+function getConversationsDigest(convs: Record<string, TrajectorySummary>): string {
+  const keys = Object.keys(convs);
+  let hash = `${keys.length}:`;
+  for (const k of keys) {
+    const item = convs[k];
+    hash += `${k}:${item?.lastModifiedTime || ''}:${item?.stepCount || 0}:${item?.summary || ''};`;
+  }
+  return hash;
+}
+
+/**
+ * 计算方案计划集合轻量哈希指纹
+ */
+function getPlansDigest(plans: PlanItem[]): string {
+  let hash = `${plans.length}:`;
+  for (const p of plans) {
+    hash += `${p.id}:${p.lastModifiedTime}:${p.artifacts?.length || 0};`;
+  }
+  return hash;
+}
+
+/**
+ * 刷新并向前端推送脑图方案计划列表 (带数据指纹脏检查)
  *
  * @param state 共享刷新状态
  * @param postMessage 前端消息投递函数
+ * @param forcePush 是否强制推送
  */
 export function refreshPlans(
   state: RefreshState,
   postMessage: (msg: WebviewOutgoingMessage) => void,
+  forcePush = false,
 ): void {
   try {
     state.cachedPlans = scanBrainPlans(state.detectedAppDataDirs);
-    postMessage({ command: 'setPlans', plans: state.cachedPlans });
+    const newDigest = getPlansDigest(state.cachedPlans);
+    if (forcePush || newDigest !== state.lastSentPlansDigest) {
+      state.lastSentPlansDigest = newDigest;
+      postMessage({ command: 'setPlans', plans: state.cachedPlans });
+    }
   } catch (e) {
     postMessage({ command: 'error', text: `方案计划扫描失败: ${e}` });
   }
@@ -75,6 +107,7 @@ export async function runProgressiveRefresh(
   postMessage({ command: 'setLanguage', language: currentLang });
 
   if (Object.keys(state.cachedConversations).length > 0) {
+    state.lastSentConvDigest = getConversationsDigest(state.cachedConversations);
     postMessage({
       command: 'setConversations',
       data: state.cachedConversations,
@@ -136,12 +169,16 @@ export async function runProgressiveRefresh(
       }
     }
 
-    // 阶段二成果即时下发前端
-    postMessage({
-      command: 'setConversations',
-      data: state.cachedConversations,
-      convDir: primaryConvDir,
-    });
+    // 阶段二成果：仅在数据有实质变更时才下发前端，避免 5ms 内连续二次全量重绘
+    const stage2Digest = getConversationsDigest(state.cachedConversations);
+    if (stage2Digest !== state.lastSentConvDigest) {
+      state.lastSentConvDigest = stage2Digest;
+      postMessage({
+        command: 'setConversations',
+        data: state.cachedConversations,
+        convDir: primaryConvDir,
+      });
+    }
   } catch (err) {
     postMessage({ command: 'error', text: `本地会话对齐失败: ${err}` });
   }
@@ -157,7 +194,7 @@ export async function runProgressiveRefresh(
   // 使用 setImmediate / Promise 触发后台静默探测任务
   Promise.resolve().then(async () => {
     try {
-      // 1. 扫描正在运行的语言服务进程与端口
+      // 1. 异步非阻塞扫描正在运行的语言服务进程与端口
       const result = await discoverAndListAll();
       state.cachedEndpointMap = result.cascadeToEndpoint;
       state.detectedAppDataDirs = result.appDataDirs;
@@ -190,6 +227,7 @@ export async function runProgressiveRefresh(
           );
 
           if (recovery.activated > 0) {
+            state.lastSentConvDigest = getConversationsDigest(state.cachedConversations);
             postMessage({
               command: 'setConversations',
               data: state.cachedConversations,
@@ -204,12 +242,16 @@ export async function runProgressiveRefresh(
         }
       }
 
-      // 静默同步最终合并结果
-      postMessage({
-        command: 'setConversations',
-        data: state.cachedConversations,
-        convDir: primaryConvDir,
-      });
+      // 静默同步最终合并结果 (带脏检查，无变更则跳过前端推送)
+      const finalDigest = getConversationsDigest(state.cachedConversations);
+      if (finalDigest !== state.lastSentConvDigest) {
+        state.lastSentConvDigest = finalDigest;
+        postMessage({
+          command: 'setConversations',
+          data: state.cachedConversations,
+          convDir: primaryConvDir,
+        });
+      }
 
       // 持久化回写缓存
       writeCache(state.cachedConversations);

@@ -16,10 +16,28 @@
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
   let searchDebounceTimer = null;
 
+  let renderRafId = null;
+
   /**
-   * 依据当前激活标签分发渲染对应视图
+   * 依据当前激活标签分发渲染对应视图 (内置 rAF 渲染调度合并，消除高频连续重绘)
+   *
+   * @param {boolean} immediate 是否立即同步渲染
    */
-  function renderCurrentView() {
+  function renderCurrentView(immediate = false) {
+    if (immediate || typeof requestAnimationFrame !== 'function') {
+      doRender();
+      return;
+    }
+    if (renderRafId) {
+      cancelAnimationFrame(renderRafId);
+    }
+    renderRafId = requestAnimationFrame(() => {
+      renderRafId = null;
+      doRender();
+    });
+  }
+
+  function doRender() {
     const state = window.AG_State;
     if (!window.AG_Renderer) {
       return;
@@ -47,7 +65,7 @@
       refreshBtn.classList.add('spinning');
       setTimeout(() => {
         refreshBtn.classList.remove('spinning');
-      }, 600);
+      }, 350);
     }
 
     const state = window.AG_State;
