@@ -41,8 +41,25 @@
       return html;
     }
 
+    // 智能默认折叠策略：仅对庞大海量的【对话历史】按日期分组且非搜索态生效
+    // 方案计划列表天然轻量，保持全量展开，消灭视觉误判
+    const autoCollapseOld = state.activeTab === 'conversations' && !state.userTouchedCollapse && state.groupBy === 'date' && !state.searchQuery;
+
     for (const [groupLabel, items] of groups) {
-      const isCollapsed = collapsedGroups.has(groupLabel);
+      let isCollapsed = collapsedGroups.has(groupLabel);
+      if (autoCollapseOld && !collapsedGroups.has(groupLabel)) {
+        const isRecent = groupLabel === t('timeToday') || groupLabel === t('timeYesterday');
+        if (!isRecent) {
+          isCollapsed = true;
+          collapsedGroups.add(groupLabel);
+        }
+      }
+
+      // 若处于搜索关键词过滤状态，且该分组命中了条目，强制展开供用户查阅
+      if (state.searchQuery && items && items.length > 0) {
+        isCollapsed = false;
+      }
+
       const arrow = isCollapsed ? '&#x25B6;' : '&#x25BC;';
       const safeItems = Array.isArray(items) ? items : [];
 

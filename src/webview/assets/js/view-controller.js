@@ -80,6 +80,9 @@
 
     if (window.AG_VSCODE) {
       window.AG_VSCODE.postMessage({ command: 'refresh' });
+      if (state.activeTab === 'plans') {
+        window.AG_VSCODE.postMessage({ command: 'refreshPlans' });
+      }
     }
   }
 
@@ -88,6 +91,7 @@
    */
   function expandAll() {
     const state = window.AG_State;
+    state.userTouchedCollapse = true;
     state.collapsedGroups.clear();
     renderCurrentView();
   }
@@ -97,6 +101,7 @@
    */
   function collapseAll() {
     const state = window.AG_State;
+    state.userTouchedCollapse = true;
     const listContainer = document.getElementById('list-container');
     if (!listContainer) {
       return;
@@ -123,6 +128,7 @@
       return;
     }
     const state = window.AG_State;
+    state.userTouchedCollapse = true;
     if (state.collapsedGroups.has(groupKey)) {
       state.collapsedGroups.delete(groupKey);
     } else {
@@ -239,8 +245,8 @@
       window.AG_Batch.updateBatchBar();
     }
 
-    // 主动检查并拉取数据，防止首次初始化丢失
-    if (targetTab === 'plans' && (!state.plans || state.plans.length === 0)) {
+    // 主动检查并拉取数据，切换到方案计划时立即请求最新工件，防止首次初始化丢失
+    if (targetTab === 'plans') {
       if (window.AG_VSCODE) {
         window.AG_VSCODE.postMessage({ command: 'refreshPlans' });
       }

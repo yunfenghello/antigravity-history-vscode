@@ -62,13 +62,25 @@ export function getBrainCandidateDirs(customDirs: string[] = []): string[] {
 }
 
 /**
- * 从 Markdown 文件中提取第一行一级标题作为展示标题
+ * 从 Markdown 文件中提取第一行一级标题作为展示标题 (仅读取文件头部 2KB，高性能实现)
  */
 function extractMarkdownTitle(filePath: string): string {
   try {
     if (!fs.existsSync(filePath)) { return ''; }
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n');
+    let fd: number | null = null;
+    let raw = '';
+    try {
+      fd = fs.openSync(filePath, 'r');
+      const buf = Buffer.alloc(2048);
+      const bytesRead = fs.readSync(fd, buf, 0, 2048, 0);
+      raw = buf.toString('utf-8', 0, bytesRead);
+    } finally {
+      if (fd !== null) {
+        fs.closeSync(fd);
+      }
+    }
+
+    const lines = raw.split('\n');
     for (const rawLine of lines) {
       const line = rawLine.trim();
       if (line.startsWith('# ')) {
@@ -103,15 +115,28 @@ function cleanWorkspacePath(rawPath: string): string {
 }
 
 /**
- * 从会话日志中解析关联的项目工作区绝对路径
+ * 从会话日志中解析关联的项目工作区绝对路径 (流式读取前 4KB 头部，杜绝全量加载大文件)
  */
 function extractWorkspaceFromTranscript(brainSubDir: string): string | undefined {
   try {
     const logPath = path.join(brainSubDir, '.system_generated', 'logs', 'transcript.jsonl');
     if (!fs.existsSync(logPath)) { return undefined; }
 
-    const raw = fs.readFileSync(logPath, 'utf-8');
-    const firstLines = raw.split('\n').slice(0, 5);
+    let fd: number | null = null;
+    let raw = '';
+    try {
+      fd = fs.openSync(logPath, 'r');
+      const buf = Buffer.alloc(4096);
+      const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+      if (bytesRead <= 0) { return undefined; }
+      raw = buf.toString('utf-8', 0, bytesRead);
+    } finally {
+      if (fd !== null) {
+        fs.closeSync(fd);
+      }
+    }
+
+    const firstLines = raw.split('\n').slice(0, 10);
 
     for (const line of firstLines) {
       if (!line.trim()) { continue; }
@@ -140,7 +165,9 @@ function extractWorkspaceFromTranscript(brainSubDir: string): string | undefined
 }
 
 /**
- * 扫描全部脑图目录，获取所有包含工件的方案计划列表
+ * 扫描全部脑图目录，获取所有包含工件的方案计划列表 (流式读取前部，2ms 极速扫描)
+ *
+ * @param customDirs 自定义目录列表
  */
 export function scanBrainPlans(customDirs: string[] = []): PlanItem[] {
   const rootDirs = getBrainCandidateDirs(customDirs);
@@ -228,8 +255,8 @@ export function scanBrainPlans(customDirs: string[] = []): PlanItem[] {
 
             const workspacePath = extractWorkspaceFromTranscript(subDir);
 
-            const existing = planMap.get(sub);
-            if (!existing || latestMtime.getTime() > new Date(existing.lastModifiedTime).getTime()) {
+            const prev = planMap.get(sub);
+            if (!prev || latestMtime.getTime() > new Date(prev.lastModifiedTime).getTime()) {
               planMap.set(sub, {
                 id: sub,
                 title,

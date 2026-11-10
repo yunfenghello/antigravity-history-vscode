@@ -189,6 +189,70 @@ export async function getLiveWorkingEndpoints(): Promise<LsEndpoint[]> {
 }
 
 /**
+ * 快速心跳探活已有端点列表 (毫秒级复用，杜绝重复执行 wmic / netstat 进程扫描)
+ *
+ * @param knownEndpoints 上一轮已发现的有效端点列表
+ * @returns 若成功复用则返回会话与端点结构，若端点失效或为空则返回 null
+ */
+export async function fastCheckLiveEndpoints(knownEndpoints: LsEndpoint[]): Promise<{
+  conversations: Record<string, TrajectorySummary>;
+  cascadeToEndpoint: Record<string, { port: number; csrf: string; appDataDir?: string }>;
+  endpoints: LsEndpoint[];
+  appDataDirs: string[];
+} | null> {
+  if (!knownEndpoints || knownEndpoints.length === 0) {
+    return null;
+  }
+
+  const conversations: Record<string, TrajectorySummary> = {};
+  const cascadeToEndpoint: Record<string, { port: number; csrf: string; appDataDir?: string }> = {};
+  const activeEndpoints: LsEndpoint[] = [];
+  const appDataDirsSet = new Set<string>();
+
+  // 并发向已有端点发起快速心跳探活请求 (超时时间设为 800ms)
+  const probeTasks = knownEndpoints.map(async (ep) => {
+    try {
+      const result = await callApi(ep.port, ep.csrf, 'GetAllCascadeTrajectories', {}, 800);
+      if (result !== null) {
+        return { ep, summaries: (result.trajectorySummaries as Record<string, TrajectorySummary>) || {} };
+      }
+    } catch {
+      // 忽略单个探活异常
+    }
+    return null;
+  });
+
+  const results = await Promise.all(probeTasks);
+
+  for (const item of results) {
+    if (item && item.ep) {
+      activeEndpoints.push(item.ep);
+      if (item.ep.appDataDir) {
+        appDataDirsSet.add(item.ep.appDataDir);
+      }
+      for (const [cid, info] of Object.entries(item.summaries)) {
+        if (!(cid in conversations)) {
+          conversations[cid] = info;
+          cascadeToEndpoint[cid] = { port: item.ep.port, csrf: item.ep.csrf, appDataDir: item.ep.appDataDir };
+        }
+      }
+    }
+  }
+
+  // 只要至少有一个已知端点存活且响应正常，即可短路复用，无需执行全系统外部进程扫描
+  if (activeEndpoints.length > 0) {
+    return {
+      conversations,
+      cascadeToEndpoint,
+      endpoints: activeEndpoints,
+      appDataDirs: Array.from(appDataDirsSet),
+    };
+  }
+
+  return null;
+}
+
+/**
  * 自动发现所有运行中的语言服务实例并汇总会话列表 (全异步非阻塞批处理)
  */
 export async function discoverAndListAll(): Promise<{

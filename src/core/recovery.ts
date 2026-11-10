@@ -125,20 +125,21 @@ export function getValidDiskConversationIds(convDirs: string | string[]): Set<st
 }
 
 /**
- * 恢复未索引会话的核心摘要与标题（优先通过可用端点）
+ * 恢复未索引会话的核心摘要与标题（优先通过可用端点，支持负向未命中识别）
  */
 export async function recoverUnindexed(
   unindexedIds: string[],
   endpoints: Array<{ port: number; csrf: string }>,
   onProgress?: (done: number, total: number, id: string) => void,
   onItemLoaded?: (id: string, summary: TrajectorySummary) => void,
-): Promise<{ activated: number; failed: number; total: number }> {
+): Promise<{ activated: number; failed: number; total: number; unrecoverableIds: string[] }> {
   if (unindexedIds.length === 0 || endpoints.length === 0) {
-    return { activated: 0, failed: 0, total: 0 };
+    return { activated: 0, failed: 0, total: 0, unrecoverableIds: [] };
   }
 
   let activated = 0;
   let failed = 0;
+  const unrecoverableIds: string[] = [];
   const batchSize = 5;
 
   for (let i = 0; i < unindexedIds.length; i += batchSize) {
@@ -150,7 +151,7 @@ export async function recoverUnindexed(
         ep.csrf,
         'GetCascadeTrajectorySteps',
         { cascadeId, startIndex: 0, endIndex: 1 },
-        5000,
+        3000,
       );
 
       if (result) {
@@ -177,10 +178,12 @@ export async function recoverUnindexed(
 
         if (extractedTitle) {
           onItemLoaded?.(cascadeId, { summary: extractedTitle });
+          return { cascadeId, success: true, hasTitle: true };
         }
-        return { cascadeId, success: true };
+        // 虽然响应了但该会话确实无标题（如空会话），标记为不可恢复项，纳入负向缓存
+        return { cascadeId, success: false, hasTitle: false };
       }
-      return { cascadeId, success: false };
+      return { cascadeId, success: false, hasTitle: false };
     });
 
     const results = await Promise.all(promises);
@@ -189,12 +192,13 @@ export async function recoverUnindexed(
         activated++;
       } else {
         failed++;
+        unrecoverableIds.push(r.cascadeId);
       }
       onProgress?.(activated + failed, unindexedIds.length, r.cascadeId);
     }
   }
 
-  return { activated, failed, total: unindexedIds.length };
+  return { activated, failed, total: unindexedIds.length, unrecoverableIds };
 }
 
 /**
