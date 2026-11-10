@@ -6,8 +6,9 @@
  * - 提取实施计划 (implementation_plan.md)、任务清单 (task.md) 与变更报告 (walkthrough.md)
  * - 自动解析方案大标题与会话关联的工作区物理路径，执行 URL 中文解码
  * - 支持单件计划另存为与全套工件一键导出到指定项目工作区目录
+ * - 支持本地方案计划工件目录的单项安全物理删除与批量删除
  *
- * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 import * as fs from 'fs';
@@ -299,4 +300,88 @@ export function exportAllArtifactsForPlan(
   } catch {
     return { successCount: count, targetDir: targetDirectory };
   }
+}
+
+/**
+ * 物理删除指定方案计划的脑图工件目录
+ *
+ * 执行严格沙箱防护与父目录包含校验，杜绝越权与根目录误删风险
+ *
+ * @param planId 目标方案唯一标识 (目录名)
+ * @param customDirs 自定义脑图探测目录
+ * @returns 删除操作执行结果
+ */
+export function deletePlanDirectory(
+  planId: string,
+  customDirs: string[] = [],
+): { success: boolean; error?: string } {
+  if (!planId || typeof planId !== 'string' || path.basename(planId) !== planId) {
+    return { success: false, error: '无效或不安全的方案标识' };
+  }
+
+  const rootDirs = getBrainCandidateDirs(customDirs);
+  let found = false;
+
+  for (const root of rootDirs) {
+    const targetDir = path.join(root, planId);
+    if (fs.existsSync(targetDir)) {
+      try {
+        const stat = fs.statSync(targetDir);
+        if (!stat.isDirectory()) {
+          continue;
+        }
+
+        // 强校验：确保目标目录的标准绝对父路径与合法根目录完全一致
+        const resolvedTarget = path.resolve(targetDir);
+        const resolvedParent = path.dirname(resolvedTarget);
+        const isValidParent = rootDirs.some(
+          (validRoot) => path.resolve(validRoot).toLowerCase() === resolvedParent.toLowerCase(),
+        );
+
+        if (!isValidParent) {
+          return { success: false, error: '安全沙箱拦截：目标方案不在合法脑图目录内' };
+        }
+
+        fs.rmSync(resolvedTarget, { recursive: true, force: true });
+        found = true;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        return { success: false, error: errMsg };
+      }
+    }
+  }
+
+  if (!found) {
+    return { success: false, error: '未在本地脑图存储中找到该方案计划目录' };
+  }
+
+  return { success: true };
+}
+
+/**
+ * 批量物理删除指定方案计划集合
+ *
+ * @param planIds 待删除方案标识数组
+ * @param customDirs 自定义脑图候选目录
+ * @returns 批量删除统计结果
+ */
+export function batchDeletePlanDirectories(
+  planIds: string[],
+  customDirs: string[] = [],
+): { successCount: number; failedCount: number; failedIds: string[] } {
+  let successCount = 0;
+  let failedCount = 0;
+  const failedIds: string[] = [];
+
+  for (const pid of planIds) {
+    const res = deletePlanDirectory(pid, customDirs);
+    if (res.success) {
+      successCount++;
+    } else {
+      failedCount++;
+      failedIds.push(pid);
+    }
+  }
+
+  return { successCount, failedCount, failedIds };
 }

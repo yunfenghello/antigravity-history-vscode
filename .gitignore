@@ -3,6 +3,7 @@ node_modules/
 dist/
 out/
 *.vsix
+packages/
 .vscode-test/
 .vsce
 

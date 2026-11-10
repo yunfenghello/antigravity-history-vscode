@@ -2,7 +2,7 @@
   "name": "antigravity-history",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "yunfenghello",
   "license": "Apache-2.0",
   "icon": "resources/icon.png",
@@ -140,7 +140,8 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "package": "pwsh -File ./scripts/package.ps1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

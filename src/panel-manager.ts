@@ -7,9 +7,10 @@
  * - 单条 MD / JSON 导出支持弹出系统保存文件对话框，默认定位会话关联的项目根目录
  * - 会话项目工作区及数据目录支持在系统文件资源管理器中精准打开
  * - 批量导出支持按会话工作区项目目录归类导出与统一目录扁平导出（双模式）
+ * - 支持对话历史与方案计划单项物理删除与批量删除，具备原生模态安全防误触
  * - 全流程中英文国际化支持，支持界面动态语言切换并持久化用户偏好
  *
- * 作者/更新时间: fengyun / 2026-08-17
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 import * as vscode from 'vscode';
@@ -18,8 +19,22 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as child_process from 'child_process';
 import { discoverAndListAll, getTrajectorySteps, getLiveWorkingEndpoints, TrajectorySummary, LsEndpoint } from './ls-client.js';
-import { scanBrainPlans, exportSingleArtifact, exportAllArtifactsForPlan, PlanItem } from './plan-service.js';
-import { recoverUnindexed, getCandidateConvDirs, getConversationsDir, scanDiskConversations } from './recovery.js';
+import {
+  scanBrainPlans,
+  exportSingleArtifact,
+  exportAllArtifactsForPlan,
+  deletePlanDirectory,
+  batchDeletePlanDirectories,
+  PlanItem,
+} from './plan-service.js';
+import {
+  recoverUnindexed,
+  getCandidateConvDirs,
+  getConversationsDir,
+  scanDiskConversations,
+  deleteConversationFiles,
+  batchDeleteConversationFiles,
+} from './recovery.js';
 import { readCache, writeCache, pruneCache } from './cache.js';
 import { parseSteps, FieldLevel } from './parser.js';
 import {
@@ -164,6 +179,18 @@ export function openPanel(context: vscode.ExtensionContext): void {
           break;
         case 'exportPlanAll':
           await handleExportPlanAll(message.planId);
+          break;
+        case 'deletePlan':
+          await handleDeletePlan(message.planId);
+          break;
+        case 'batchDeletePlans':
+          await handleBatchDeletePlans(message.planIds);
+          break;
+        case 'deleteConversation':
+          await handleDeleteConversation(message.cascadeId);
+          break;
+        case 'batchDeleteConversations':
+          await handleBatchDeleteConversations(message.cascadeIds);
           break;
         case 'refresh':
           await handleRefresh();
@@ -841,6 +868,179 @@ async function handleExportPlanAll(planId: string): Promise<void> {
   }
 }
 
+/**
+ * 处理单条会话记录物理删除（触发原生模态二次确认）
+ *
+ * @param cascadeId 会话标识
+ */
+async function handleDeleteConversation(cascadeId: string): Promise<void> {
+  if (!cascadeId) {
+    return;
+  }
+  const conv = cachedConversations[cascadeId];
+  const title = conv?.summary || cascadeId;
+
+  // 唤起原生模态确认窗口
+  const confirmChoice = await vscode.window.showWarningMessage(
+    t('delete.confirmConv', undefined, title),
+    { modal: true },
+    t('common.confirmDelete'),
+  );
+
+  if (confirmChoice !== t('common.confirmDelete')) {
+    return;
+  }
+
+  // 1. 立即通知前端执行即时乐观移除 (0 延迟自动刷新)
+  postMessage({ command: 'optimisticDeleteConvs', cascadeIds: [cascadeId] });
+
+  // 2. 后台异步并发彻底清除物理文件
+  const result = await deleteConversationFiles(cascadeId, detectedAppDataDirs);
+
+  // 3. 维护内存状态 (重塑全新对象引用)
+  const nextConvs: Record<string, TrajectorySummary> = {};
+  for (const [k, v] of Object.entries(cachedConversations)) {
+    if (k !== cascadeId) {
+      nextConvs[k] = v;
+    }
+  }
+  cachedConversations = nextConvs;
+
+  // 4. 同步淘汰本地持久化缓存
+  const cache = readCache();
+  if (cache[cascadeId]) {
+    delete cache[cascadeId];
+    writeCache(cache);
+  }
+
+  vscode.window.showInformationMessage(t('delete.convSuccess', undefined, title));
+  postMessage({ command: 'toast', text: t('delete.convSuccess', undefined, title) });
+}
+
+/**
+ * 处理批量会话记录物理删除
+ *
+ * @param cascadeIds 待删除会话标识数组
+ */
+async function handleBatchDeleteConversations(cascadeIds: string[]): Promise<void> {
+  if (!Array.isArray(cascadeIds) || cascadeIds.length === 0) {
+    vscode.window.showWarningMessage(t('delete.nothingSelected'));
+    return;
+  }
+
+  // 唤起原生模态确认窗口
+  const confirmChoice = await vscode.window.showWarningMessage(
+    t('delete.confirmBatchConv', undefined, String(cascadeIds.length)),
+    { modal: true },
+    t('common.confirmBatchDelete'),
+  );
+
+  if (confirmChoice !== t('common.confirmBatchDelete')) {
+    return;
+  }
+
+  // 1. 立即通知前端执行即时乐观移除 (0 延迟自动刷新卡片)
+  postMessage({ command: 'optimisticDeleteConvs', cascadeIds });
+
+  // 2. 后台异步高并发清理磁盘实体与关联文件
+  const result = await batchDeleteConversationFiles(cascadeIds, detectedAppDataDirs);
+
+  // 3. 批量更新内存与本地缓存 (重塑全新字典引用)
+  const deleteSet = new Set(cascadeIds);
+  const nextConvs: Record<string, TrajectorySummary> = {};
+  for (const [k, v] of Object.entries(cachedConversations)) {
+    if (!deleteSet.has(k)) {
+      nextConvs[k] = v;
+    }
+  }
+  cachedConversations = nextConvs;
+
+  const cache = readCache();
+  let cacheModified = false;
+  for (const cid of cascadeIds) {
+    if (cache[cid]) {
+      delete cache[cid];
+      cacheModified = true;
+    }
+  }
+  if (cacheModified) {
+    writeCache(cache);
+  }
+
+  const msg = t('delete.batchConvSuccess', undefined, result.successCount, result.failedCount);
+  vscode.window.showInformationMessage(msg);
+  postMessage({ command: 'toast', text: msg });
+}
+
+/**
+ * 处理单项方案计划物理删除
+ *
+ * @param planId 方案标识
+ */
+async function handleDeletePlan(planId: string): Promise<void> {
+  if (!planId) {
+    return;
+  }
+  const plan = cachedPlans.find((p) => p.id === planId);
+  const title = plan?.title || planId;
+
+  // 唤起原生模态确认窗口
+  const confirmChoice = await vscode.window.showWarningMessage(
+    t('delete.confirmPlan', undefined, title),
+    { modal: true },
+    t('common.confirmDelete'),
+  );
+
+  if (confirmChoice !== t('common.confirmDelete')) {
+    return;
+  }
+
+  // 1. 立即通知前端即时移除
+  postMessage({ command: 'optimisticDeletePlans', planIds: [planId] });
+
+  // 2. 物理清除目录
+  const result = deletePlanDirectory(planId, detectedAppDataDirs);
+  cachedPlans = cachedPlans.filter((p) => p.id !== planId);
+
+  vscode.window.showInformationMessage(t('delete.planSuccess', undefined, title));
+  postMessage({ command: 'toast', text: t('delete.planSuccess', undefined, title) });
+}
+
+/**
+ * 处理批量方案计划物理删除
+ *
+ * @param planIds 待删除方案标识数组
+ */
+async function handleBatchDeletePlans(planIds: string[]): Promise<void> {
+  if (!Array.isArray(planIds) || planIds.length === 0) {
+    vscode.window.showWarningMessage(t('delete.nothingSelected'));
+    return;
+  }
+
+  // 唤起原生模态确认窗口
+  const confirmChoice = await vscode.window.showWarningMessage(
+    t('delete.confirmBatchPlan', undefined, String(planIds.length)),
+    { modal: true },
+    t('common.confirmBatchDelete'),
+  );
+
+  if (confirmChoice !== t('common.confirmBatchDelete')) {
+    return;
+  }
+
+  // 1. 立即通知前端即时移除
+  postMessage({ command: 'optimisticDeletePlans', planIds });
+
+  // 2. 物理清除
+  const result = batchDeletePlanDirectories(planIds, detectedAppDataDirs);
+  const deleteSet = new Set(planIds);
+  cachedPlans = cachedPlans.filter((p) => !deleteSet.has(p.id));
+
+  const msg = t('delete.batchPlanSuccess', undefined, result.successCount, result.failedCount);
+  vscode.window.showInformationMessage(msg);
+  postMessage({ command: 'toast', text: msg });
+}
+
 function postMessage(msg: Record<string, unknown>): void {
   currentPanel?.webview.postMessage(msg);
 }
@@ -892,6 +1092,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
       <button class="seg-btn" id="btn-collapse-all" title="全部折叠">折叠</button>
     </div>
     <button class="btn btn-icon" id="btn-refresh" title="刷新">刷新</button>
+    <button class="btn btn-secondary" id="btn-toggle-batch" title="开启或退出批量管理模式">批量管理</button>
     <select class="field-level-select" id="export-strategy-select" title="导出归属模式">
       <option value="workspace" selected>按所属项目归类</option>
       <option value="unified">统一导出目录</option>
@@ -910,6 +1111,18 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): stri
       <option value="en"${currentLang === 'en' ? ' selected' : ''}>English</option>
     </select>
     <button class="btn btn-primary" id="btn-export-all">全部导出</button>
+  </div>
+  <div class="batch-toolbar" id="batch-toolbar" style="display:none;">
+    <div class="batch-status">
+      <span class="batch-count" id="batch-selected-count">已选择 0 项</span>
+    </div>
+    <div class="batch-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-select-all">全选</button>
+      <button class="btn btn-secondary btn-sm" id="btn-invert-select">反选</button>
+      <button class="btn btn-secondary btn-sm" id="btn-deselect-all">取消全选</button>
+      <button class="btn btn-danger btn-sm" id="btn-batch-delete">批量删除</button>
+      <button class="btn btn-secondary btn-sm" id="btn-exit-batch">退出批量</button>
+    </div>
   </div>
   <div class="stats-bar" id="stats-bar"></div>
   <div class="export-path-bar" id="export-path-bar"></div>

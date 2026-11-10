@@ -6,7 +6,7 @@
  * - 提供类型安全的翻译函数及参数占位符格式化支持
  * - 支持根据用户配置与运行环境动态解析当前显示语言
  *
- * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 import * as vscode from 'vscode';
@@ -68,6 +68,19 @@ export const messages: Record<Language, Record<string, string>> = {
     'report.noWorkspace': '无工作区',
     'report.unknown': '未知',
     'report.failedTag': ' [失败]',
+    'common.confirm': '确定',
+    'common.cancel': '取消',
+    'common.confirmDelete': '确认删除',
+    'common.confirmBatchDelete': '确认批量删除',
+    'delete.confirmConv': '确定要永久删除会话 "{0}" 吗？此操作将物理删除本地相关文件且不可恢复。',
+    'delete.confirmBatchConv': '确定要批量永久删除选中的 {0} 个会话记录吗？此操作将物理删除本地相关文件且不可恢复。',
+    'delete.confirmPlan': '确定要永久删除方案计划 "{0}" 吗？此操作将物理删除包含的全部工件文档且不可恢复。',
+    'delete.confirmBatchPlan': '确定要批量永久删除选中的 {0} 个方案计划吗？此操作将物理删除包含的全部工件文档且不可恢复。',
+    'delete.convSuccess': '已成功删除会话 [{0}]',
+    'delete.batchConvSuccess': '已成功删除 {0} 个会话 ({1} 个失败)',
+    'delete.planSuccess': '已成功删除方案计划 [{0}]',
+    'delete.batchPlanSuccess': '已成功删除 {0} 个方案计划 ({1} 个失败)',
+    'delete.nothingSelected': '未选中任何待删除项目',
   },
   'en': {
     'statusBar.tooltip': 'Open Antigravity History',
@@ -118,6 +131,19 @@ export const messages: Record<Language, Record<string, string>> = {
     'report.noWorkspace': 'No Workspace',
     'report.unknown': 'Unknown',
     'report.failedTag': ' [FAILED]',
+    'common.confirm': 'OK',
+    'common.cancel': 'Cancel',
+    'common.confirmDelete': 'Confirm Delete',
+    'common.confirmBatchDelete': 'Confirm Batch Delete',
+    'delete.confirmConv': 'Are you sure you want to permanently delete conversation "{0}"? This will physically remove local files and cannot be undone.',
+    'delete.confirmBatchConv': 'Are you sure you want to permanently delete {0} selected conversations? This will physically remove local files and cannot be undone.',
+    'delete.confirmPlan': 'Are you sure you want to permanently delete plan "{0}"? This will physically remove all contained artifact files and cannot be undone.',
+    'delete.confirmBatchPlan': 'Are you sure you want to permanently delete {0} selected plans? This will physically remove all contained artifact files and cannot be undone.',
+    'delete.convSuccess': 'Successfully deleted conversation [{0}]',
+    'delete.batchConvSuccess': 'Successfully deleted {0} conversations ({1} failed)',
+    'delete.planSuccess': 'Successfully deleted plan [{0}]',
+    'delete.batchPlanSuccess': 'Successfully deleted {0} plans ({1} failed)',
+    'delete.nothingSelected': 'No items selected for deletion',
   },
 };
 

@@ -7,9 +7,10 @@
  * - 全量事件委托 (Event Delegation)，消除数千个节点的冗余监听器，渲染耗时降低 95%
  * - 分组智能折叠与按需懒渲染，折叠状态下不构建 DOM，秒级秒开
  * - 方案计划专属下载：支持实施方案单文件弹窗另存为与全套工件一键导出到项目目录
+ * - 对话历史与方案计划单项物理删除与批量多选删除，集成双重防护与状态同步
  * - 内置轻量中英文多语言国际化词典，支持界面动态语言无刷新即时切换与持久化
  *
- * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 (function () {
@@ -83,6 +84,19 @@
       loadingText: '正在扫描并同步最新数据...',
       errorTitle: '发生错误',
       retryBtn: '重试',
+      deleteBtn: '删除',
+      deletePlanBtn: '删除方案',
+      deleteConvTooltip: '永久删除此会话记录与本地文件',
+      deletePlanTooltip: '永久删除此方案计划及其全部工件',
+      batchModeBtn: '批量管理',
+      exitBatchModeBtn: '退出批量',
+      selectAllBtn: '全选',
+      deselectAllBtn: '取消全选',
+      invertSelectBtn: '反选',
+      batchDeleteBtn: '批量删除',
+      batchDeleteWithCount: '批量删除 ({0})',
+      selectedCount: '已选择 {0} 项',
+      noItemSelected: '请先勾选待删除的项目',
     },
     'en': {
       tabConversations: 'Conversations',
@@ -149,6 +163,19 @@
       loadingText: 'Scanning and syncing latest data...',
       errorTitle: 'Error Occurred',
       retryBtn: 'Retry',
+      deleteBtn: 'Delete',
+      deletePlanBtn: 'Delete Plan',
+      deleteConvTooltip: 'Permanently delete this conversation and local files',
+      deletePlanTooltip: 'Permanently delete this plan and all its artifacts',
+      batchModeBtn: 'Batch Actions',
+      exitBatchModeBtn: 'Exit Batch',
+      selectAllBtn: 'Select All',
+      deselectAllBtn: 'Deselect All',
+      invertSelectBtn: 'Invert',
+      batchDeleteBtn: 'Batch Delete',
+      batchDeleteWithCount: 'Delete Selected ({0})',
+      selectedCount: '{0} items selected',
+      noItemSelected: 'Please select items to delete first',
     },
   };
 
@@ -174,6 +201,9 @@
   let searchQuery = '';
   let collapsedGroups = new Set();
   let exportPath = '';
+  let isBatchMode = false;
+  let selectedConvIds = new Set();
+  let selectedPlanIds = new Set();
 
   // ── DOM 节点缓存 ──
   const tabConversationsBtn = document.getElementById('tab-conversations');
@@ -184,6 +214,7 @@
   const expandAllBtn = document.getElementById('btn-expand-all');
   const collapseAllBtn = document.getElementById('btn-collapse-all');
   const refreshBtn = document.getElementById('btn-refresh');
+  const toggleBatchBtn = document.getElementById('btn-toggle-batch');
   const exportAllBtn = document.getElementById('btn-export-all');
   const fieldLevelSelect = document.getElementById('field-level-select');
   const exportStrategySelect = document.getElementById('export-strategy-select');
@@ -192,6 +223,145 @@
   const statsBar = document.getElementById('stats-bar');
   const listContainer = document.getElementById('list-container');
   const toastEl = document.getElementById('toast');
+
+  // 批量操作 DOM
+  const batchToolbar = document.getElementById('batch-toolbar');
+  const batchSelectedCount = document.getElementById('batch-selected-count');
+  const selectAllBtn = document.getElementById('btn-select-all');
+  const invertSelectBtn = document.getElementById('btn-invert-select');
+  const deselectAllBtn = document.getElementById('btn-deselect-all');
+  const batchDeleteBtn = document.getElementById('btn-batch-delete');
+  const exitBatchBtn = document.getElementById('btn-exit-batch');
+
+  // ── 批量操作状态栏刷新 ──
+  function updateBatchBar() {
+    const selectedSet = activeTab === 'conversations' ? selectedConvIds : selectedPlanIds;
+    if (batchSelectedCount) {
+      batchSelectedCount.textContent = t('selectedCount', selectedSet.size);
+    }
+    if (batchDeleteBtn) {
+      batchDeleteBtn.textContent = t('batchDeleteWithCount', selectedSet.size);
+      batchDeleteBtn.disabled = selectedSet.size === 0;
+      batchDeleteBtn.style.opacity = selectedSet.size === 0 ? '0.5' : '1';
+    }
+  }
+
+  // ── 切换批量模式 ──
+  function toggleBatchMode(forceVal) {
+    isBatchMode = typeof forceVal === 'boolean' ? forceVal : !isBatchMode;
+    if (!isBatchMode) {
+      selectedConvIds.clear();
+      selectedPlanIds.clear();
+    }
+    if (batchToolbar) {
+      batchToolbar.style.display = isBatchMode ? 'flex' : 'none';
+    }
+    if (toggleBatchBtn) {
+      toggleBatchBtn.classList.toggle('active', isBatchMode);
+      toggleBatchBtn.textContent = isBatchMode ? t('exitBatchModeBtn') : t('batchModeBtn');
+    }
+    updateBatchBar();
+    if (activeTab === 'conversations') {
+      renderList();
+    } else {
+      renderPlansList();
+    }
+  }
+
+  // ── 批量选择与批量删除核心逻辑 ──
+  function getVisibleItemIds() {
+    if (activeTab === 'conversations') {
+      const entries = Object.entries(conversations);
+      const filtered = entries.filter(([cid, info]) => {
+        if (!searchQuery) return true;
+        const title = (info.summary || '').toLowerCase();
+        const id = cid.toLowerCase();
+        const ws = (info.workspaces || [])
+          .map((w) => (w.workspaceFolderAbsoluteUri || '').toLowerCase())
+          .join(' ');
+        return title.includes(searchQuery) || id.includes(searchQuery) || ws.includes(searchQuery);
+      });
+      return filtered.map(([cid]) => cid);
+    } else {
+      const filtered = plans.filter((plan) => {
+        if (!searchQuery) return true;
+        const title = (plan.title || '').toLowerCase();
+        const id = (plan.id || '').toLowerCase();
+        const ws = (plan.workspacePath || '').toLowerCase();
+        return title.includes(searchQuery) || id.includes(searchQuery) || ws.includes(searchQuery);
+      });
+      return filtered.map((p) => p.id);
+    }
+  }
+
+  function handleSelectAll() {
+    const ids = getVisibleItemIds();
+    if (activeTab === 'conversations') {
+      ids.forEach((id) => selectedConvIds.add(id));
+      renderList();
+    } else {
+      ids.forEach((id) => selectedPlanIds.add(id));
+      renderPlansList();
+    }
+    updateBatchBar();
+  }
+
+  function handleInvertSelect() {
+    const ids = getVisibleItemIds();
+    if (activeTab === 'conversations') {
+      ids.forEach((id) => {
+        if (selectedConvIds.has(id)) {
+          selectedConvIds.delete(id);
+        } else {
+          selectedConvIds.add(id);
+        }
+      });
+      renderList();
+    } else {
+      ids.forEach((id) => {
+        if (selectedPlanIds.has(id)) {
+          selectedPlanIds.delete(id);
+        } else {
+          selectedPlanIds.add(id);
+        }
+      });
+      renderPlansList();
+    }
+    updateBatchBar();
+  }
+
+  function handleDeselectAll() {
+    if (activeTab === 'conversations') {
+      selectedConvIds.clear();
+      renderList();
+    } else {
+      selectedPlanIds.clear();
+      renderPlansList();
+    }
+    updateBatchBar();
+  }
+
+  function handleBatchDelete() {
+    if (activeTab === 'conversations') {
+      if (selectedConvIds.size === 0) {
+        showToast(t('noItemSelected'));
+        return;
+      }
+      vscode.postMessage({
+        command: 'batchDeleteConversations',
+        cascadeIds: Array.from(selectedConvIds),
+      });
+    } else {
+      if (selectedPlanIds.size === 0) {
+        showToast(t('noItemSelected'));
+        return;
+      }
+      vscode.postMessage({
+        command: 'batchDeletePlans',
+        planIds: Array.from(selectedPlanIds),
+      });
+    }
+  }
 
   // ── 静态文案刷新 ──
   function updateStaticTexts() {
@@ -216,6 +386,14 @@
       refreshBtn.textContent = t('refresh');
       refreshBtn.title = t('refreshTitle');
     }
+    if (toggleBatchBtn) {
+      toggleBatchBtn.textContent = isBatchMode ? t('exitBatchModeBtn') : t('batchModeBtn');
+    }
+    if (selectAllBtn) selectAllBtn.textContent = t('selectAllBtn');
+    if (invertSelectBtn) invertSelectBtn.textContent = t('invertSelectBtn');
+    if (deselectAllBtn) deselectAllBtn.textContent = t('deselectAllBtn');
+    if (exitBatchBtn) exitBatchBtn.textContent = t('exitBatchModeBtn');
+    updateBatchBar();
     if (exportAllBtn) exportAllBtn.textContent = t('exportAll');
 
     if (exportStrategySelect) {
@@ -257,6 +435,11 @@
     searchQuery = '';
     if (searchInput) searchInput.value = '';
 
+    // 切换 Tab 时重置选区
+    selectedConvIds.clear();
+    selectedPlanIds.clear();
+    updateBatchBar();
+
     if (newTab === 'conversations') {
       tabConversationsBtn?.classList.add('active');
       tabPlansBtn?.classList.remove('active');
@@ -288,6 +471,30 @@
   tabPlansBtn?.addEventListener('click', () => switchTab('plans'));
 
   // ── 顶部按钮事件监听 ──
+  if (toggleBatchBtn) {
+    toggleBatchBtn.addEventListener('click', () => toggleBatchMode());
+  }
+
+  if (selectAllBtn) {
+    selectAllBtn.addEventListener('click', () => handleSelectAll());
+  }
+
+  if (invertSelectBtn) {
+    invertSelectBtn.addEventListener('click', () => handleInvertSelect());
+  }
+
+  if (deselectAllBtn) {
+    deselectAllBtn.addEventListener('click', () => handleDeselectAll());
+  }
+
+  if (exitBatchBtn) {
+    exitBatchBtn.addEventListener('click', () => toggleBatchMode(false));
+  }
+
+  if (batchDeleteBtn) {
+    batchDeleteBtn.addEventListener('click', () => handleBatchDelete());
+  }
+
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
       showLoading();
@@ -433,6 +640,69 @@
         if (folderPath) {
           vscode.postMessage({ command: 'openInExplorer', path: folderPath });
         }
+      } else if (action === 'deleteConv') {
+        vscode.postMessage({ command: 'deleteConversation', cascadeId });
+      } else if (action === 'deletePlan') {
+        vscode.postMessage({ command: 'deletePlan', planId });
+      }
+      return;
+    }
+
+    // 3. 处理批量模式下的卡片勾选或整行点击切换
+    if (isBatchMode) {
+      const card = e.target.closest('.conv-card');
+      if (card) {
+        const checkbox = e.target.closest('.conv-checkbox');
+        const cid = card.getAttribute('data-cascade-id');
+        const pid = card.getAttribute('data-plan-id');
+
+        if (activeTab === 'conversations' && cid) {
+          if (checkbox) {
+            if (checkbox.checked) {
+              selectedConvIds.add(cid);
+              card.classList.add('selected');
+            } else {
+              selectedConvIds.delete(cid);
+              card.classList.remove('selected');
+            }
+          } else {
+            const cb = card.querySelector('.conv-checkbox');
+            if (selectedConvIds.has(cid)) {
+              selectedConvIds.delete(cid);
+              card.classList.remove('selected');
+              if (cb) cb.checked = false;
+            } else {
+              selectedConvIds.add(cid);
+              card.classList.add('selected');
+              if (cb) cb.checked = true;
+            }
+          }
+          updateBatchBar();
+          return;
+        } else if (activeTab === 'plans' && pid) {
+          if (checkbox) {
+            if (checkbox.checked) {
+              selectedPlanIds.add(pid);
+              card.classList.add('selected');
+            } else {
+              selectedPlanIds.delete(pid);
+              card.classList.remove('selected');
+            }
+          } else {
+            const cb = card.querySelector('.conv-checkbox');
+            if (selectedPlanIds.has(pid)) {
+              selectedPlanIds.delete(pid);
+              card.classList.remove('selected');
+              if (cb) cb.checked = false;
+            } else {
+              selectedPlanIds.add(pid);
+              card.classList.add('selected');
+              if (cb) cb.checked = true;
+            }
+          }
+          updateBatchBar();
+          return;
+        }
       }
     }
   });
@@ -441,6 +711,38 @@
   window.addEventListener('message', (event) => {
     const msg = event.data;
     switch (msg.command) {
+      case 'optimisticDeleteConvs':
+        if (Array.isArray(msg.cascadeIds)) {
+          for (const cid of msg.cascadeIds) {
+            delete conversations[cid];
+            selectedConvIds.delete(cid);
+          }
+          updateBatchBar();
+          if (activeTab === 'conversations') {
+            renderList();
+          }
+        }
+        break;
+
+      case 'optimisticDeletePlans':
+        if (Array.isArray(msg.planIds)) {
+          const deleteSet = new Set(msg.planIds);
+          plans = plans.filter((p) => !deleteSet.has(p.id));
+          for (const pid of msg.planIds) {
+            selectedPlanIds.delete(pid);
+          }
+          updateBatchBar();
+          if (activeTab === 'plans') {
+            renderPlansList();
+          }
+        }
+        break;
+
+      case 'toast':
+        if (msg.text) {
+          showToast(msg.text);
+        }
+        break;
       case 'setLanguage':
         if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
           currentLang = msg.language;
@@ -456,6 +758,12 @@
       case 'setConversations':
         conversations = msg.data || {};
         if (msg.convDir) convDataDir = msg.convDir;
+        for (const cid of Array.from(selectedConvIds)) {
+          if (!conversations[cid]) {
+            selectedConvIds.delete(cid);
+          }
+        }
+        updateBatchBar();
         if (activeTab === 'conversations') {
           renderList();
         }
@@ -463,6 +771,13 @@
 
       case 'setPlans':
         plans = Array.isArray(msg.data) ? msg.data : [];
+        const planIdSet = new Set(plans.map((p) => p.id));
+        for (const pid of Array.from(selectedPlanIds)) {
+          if (!planIdSet.has(pid)) {
+            selectedPlanIds.delete(pid);
+          }
+        }
+        updateBatchBar();
         if (activeTab === 'plans') {
           renderPlansList();
         }
@@ -612,6 +927,7 @@
     const time = formatTime(info.lastModifiedTime || info.createdTime);
     const status = info.status || '';
     const statusDot = getStatusDot(status);
+    const isSelected = selectedConvIds.has(cascadeId);
 
     const workspaces = (info.workspaces || [])
       .map((w) => w.workspaceFolderAbsoluteUri)
@@ -628,8 +944,13 @@
       ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(convDataDir)}" title="${esc(convDataTooltip)}"><span class="tag-label">[存储]</span> ${esc(cascadeId)}</div>`
       : '';
 
+    const checkboxHtml = isBatchMode
+      ? `<div class="conv-checkbox-wrapper"><input type="checkbox" class="conv-checkbox" data-checkbox-id="${esc(cascadeId)}" ${isSelected ? 'checked' : ''}></div>`
+      : '';
+
     return `
-      <div class="conv-card" data-cascade-id="${esc(cascadeId)}">
+      <div class="conv-card ${isBatchMode ? 'batch-selectable' : ''} ${isSelected ? 'selected' : ''}" data-cascade-id="${esc(cascadeId)}">
+        ${checkboxHtml}
         <div class="conv-icon">${statusDot}</div>
         <div class="conv-info">
           <div class="conv-title" title="${esc(title)}">${esc(title)}</div>
@@ -641,6 +962,7 @@
           <button class="btn-export" data-action="exportMd" data-id="${esc(cascadeId)}" title="${esc(t('exportMdTooltip'))}">MD</button>
           <button class="btn-export" data-action="exportJson" data-id="${esc(cascadeId)}" title="${esc(t('exportJsonTooltip'))}">JSON</button>
           <button class="btn-export" data-action="copyId" data-id="${esc(cascadeId)}" title="${esc(t('copyIdTooltip'))}">ID</button>
+          <button class="btn-export btn-danger-action" data-action="deleteConv" data-id="${esc(cascadeId)}" title="${esc(t('deleteConvTooltip'))}">${esc(t('deleteBtn'))}</button>
         </div>
       </div>
     `;
@@ -688,6 +1010,7 @@
     const time = formatTime(plan.lastModifiedTime);
     const wsDisplay = plan.workspacePath ? toWinPath(plan.workspacePath) : t('noWorkspace');
     const wsTooltip = t('openFolderTooltip', wsDisplay);
+    const isSelected = selectedPlanIds.has(plan.id);
 
     const wsHtml = plan.workspacePath
       ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
@@ -702,8 +1025,13 @@
     }
     badgesHtml += '</div>';
 
+    const checkboxHtml = isBatchMode
+      ? `<div class="conv-checkbox-wrapper"><input type="checkbox" class="conv-checkbox" data-checkbox-plan-id="${esc(plan.id)}" ${isSelected ? 'checked' : ''}></div>`
+      : '';
+
     return `
-      <div class="conv-card plan-card" data-plan-id="${esc(plan.id)}">
+      <div class="conv-card plan-card ${isBatchMode ? 'batch-selectable' : ''} ${isSelected ? 'selected' : ''}" data-plan-id="${esc(plan.id)}">
+        ${checkboxHtml}
         <div class="conv-icon"><span class="status-dot active">●</span></div>
         <div class="conv-info">
           <div class="conv-title" style="font-weight:600;font-size:14px;" title="${esc(title)}">${esc(title)}</div>
@@ -715,6 +1043,7 @@
           <button class="btn btn-primary btn-sm" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="implementation_plan.md" title="${esc(t('savePlanTooltip'))}">${esc(t('savePlanBtn'))}</button>
           <button class="btn btn-secondary btn-sm" data-action="exportPlanAll" data-plan-id="${esc(plan.id)}" title="${esc(t('saveAllArtifactsTooltip'))}">${esc(t('saveAllArtifactsBtn'))}</button>
           <button class="btn-export" data-action="openPlanFolder" data-path="${esc(plan.dirPath)}" title="${esc(t('openPlanSourceTooltip'))}">${esc(t('openSourceFolderBtn'))}</button>
+          <button class="btn-export btn-danger-action" data-action="deletePlan" data-plan-id="${esc(plan.id)}" title="${esc(t('deletePlanTooltip'))}">${esc(t('deletePlanBtn'))}</button>
         </div>
       </div>
     `;

@@ -7,8 +7,9 @@
  * - 精准比对 .db-wal 活跃写入时间戳，确保最新修改会话置顶
  * - 提取多段用户输入条目（items）拼接还原真实会话大标题
  * - 输出物理真实存在的会话 ID 集合，为缓存淘汰与一致性校验提供事实依据
+ * - 彻底物理删除会话相关 SQLite/PB 实体文件及关联脑图数据目录，支持单条与批量删除
  *
- * 作者/更新时间: Antigravity Coding Assistant / 2026-11-03
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 import * as fs from 'fs';
@@ -194,4 +195,120 @@ export async function recoverUnindexed(
   }
 
   return { activated, failed, total: unindexedIds.length };
+}
+
+/**
+ * 彻底物理删除会话相关 SQLite/PB 实体文件及关联脑图数据目录（异步并发高性能实现）
+ *
+ * @param cascadeId 会话全局唯一标识
+ * @param customAppDirs 自定义应用目录
+ * @param precomputedDirs 预计算的会话与脑图目录列表 (提速优化)
+ * @returns 删除结果统计
+ */
+export async function deleteConversationFiles(
+  cascadeId: string,
+  customAppDirs: string[] = [],
+  precomputedDirs?: { convDirs: string[]; brainDirs: string[] },
+): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+  if (!cascadeId || typeof cascadeId !== 'string' || path.basename(cascadeId) !== cascadeId) {
+    return { success: false, deletedCount: 0, error: '无效或不合法的会话标识' };
+  }
+
+  let deletedCount = 0;
+  const convDirs = precomputedDirs ? precomputedDirs.convDirs : getCandidateConvDirs(customAppDirs);
+
+  const home = os.homedir();
+  const brainCandidates = precomputedDirs ? precomputedDirs.brainDirs : [
+    path.join(home, '.gemini', 'antigravity', 'brain'),
+    path.join(home, '.gemini', 'antigravity-ide', 'brain'),
+    path.join(home, '.gemini', 'antigravity-backup', 'brain'),
+  ];
+
+  // 1. 并发删除 conversations 目录下的实体数据库与日志文件
+  const exts = ['.db', '.db-wal', '.db-shm', '.pb'];
+  const deleteTasks: Array<Promise<void>> = [];
+
+  for (const dir of convDirs) {
+    for (const ext of exts) {
+      const targetFile = path.join(dir, `${cascadeId}${ext}`);
+      deleteTasks.push(
+        fs.promises.unlink(targetFile)
+          .then(() => {
+            deletedCount++;
+          })
+          .catch(() => {
+            // 文件不存在或已被删除时安全忽略
+          }),
+      );
+    }
+  }
+
+  // 2. 并发清理关联的 brain 数据目录 (含 transcript 日志与临时工件)
+  for (const bDir of brainCandidates) {
+    const targetBrainSub = path.join(bDir, cascadeId);
+    deleteTasks.push(
+      fs.promises.rm(targetBrainSub, { recursive: true, force: true })
+        .then(() => {
+          deletedCount++;
+        })
+        .catch(() => {
+          // 目录不存在或被系统占有时安全容错，不中断整体流程
+        }),
+    );
+  }
+
+  try {
+    await Promise.all(deleteTasks);
+    return { success: true, deletedCount };
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, deletedCount, error: errMsg };
+  }
+}
+
+/**
+ * 批量彻底物理删除会话实体文件及关联脑图数据目录（高并发毫秒级批处理）
+ *
+ * @param cascadeIds 待删除会话标识数组
+ * @param customAppDirs 自定义应用目录
+ * @returns 批量删除统计
+ */
+export async function batchDeleteConversationFiles(
+  cascadeIds: string[],
+  customAppDirs: string[] = [],
+): Promise<{ successCount: number; failedCount: number; failedIds: string[] }> {
+  let successCount = 0;
+  let failedCount = 0;
+  const failedIds: string[] = [];
+
+  const home = os.homedir();
+  const precomputedDirs = {
+    convDirs: getCandidateConvDirs(customAppDirs),
+    brainDirs: [
+      path.join(home, '.gemini', 'antigravity', 'brain'),
+      path.join(home, '.gemini', 'antigravity-ide', 'brain'),
+      path.join(home, '.gemini', 'antigravity-backup', 'brain'),
+    ],
+  };
+
+  // 采用分批并发执行，单批次最大 20 个会话并发，防止高并发耗尽操作系统文件句柄
+  const batchSize = 20;
+  for (let i = 0; i < cascadeIds.length; i += batchSize) {
+    const chunk = cascadeIds.slice(i, i + batchSize);
+    const chunkPromises = chunk.map((cid) => deleteConversationFiles(cid, customAppDirs, precomputedDirs));
+    const results = await Promise.all(chunkPromises);
+
+    for (let j = 0; j < results.length; j++) {
+      const res = results[j];
+      const cid = chunk[j];
+      if (res.success) {
+        successCount++;
+      } else {
+        failedCount++;
+        failedIds.push(cid);
+      }
+    }
+  }
+
+  return { successCount, failedCount, failedIds };
 }
