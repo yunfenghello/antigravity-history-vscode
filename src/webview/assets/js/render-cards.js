@@ -4,8 +4,8 @@
  *
  * 核心功能：
  * - 渲染【对话历史】会话卡片（严格对齐 panel.css 样式类名）
- * - 渲染【方案计划】工件卡片（支持单件下载、全部导出、源目录定位与删除）
- * - 日期与工作区分组智能折叠与按需渲染
+ * - 渲染【方案计划】工件卡片（支持按日期与工作区分组呈现、工件单独另存为与一键导出）
+ * - 日期与工作区分组智能折叠与按需懒渲染
  * - 批量模式复选框动态注入与选中边框高亮联动
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
@@ -191,11 +191,31 @@
       return;
     }
 
-    let html = '<div class="plans-list">';
-    for (const plan of filtered) {
-      html += renderPlanCard(plan);
+    // 方案计划支持按日期或工作区分组渲染
+    const groups = state.groupBy === 'workspace' ? groupPlansByWorkspace(filtered) : groupPlansByDate(filtered);
+    let html = '';
+
+    for (const [groupLabel, items] of groups) {
+      const isCollapsed = state.collapsedGroups.has(groupLabel);
+      const arrow = isCollapsed ? '&#x25B6;' : '&#x25BC;';
+
+      html += `<div class="date-group" data-group="${esc(groupLabel)}">`;
+      html += `
+        <div class="date-group-header" data-group="${esc(groupLabel)}">
+          <span class="group-arrow">${arrow}</span>
+          <span class="date-group-label">${esc(groupLabel)}</span>
+          <span class="date-group-count">(${items.length})</span>
+        </div>
+      `;
+
+      html += `<div class="group-items ${isCollapsed ? 'collapsed' : ''}">`;
+      if (!isCollapsed) {
+        for (const plan of items) {
+          html += renderPlanCard(plan);
+        }
+      }
+      html += `</div></div>`;
     }
-    html += '</div>';
 
     listContainer.innerHTML = html;
     if (window.AG_Batch) {
@@ -366,6 +386,77 @@
         groups.set(wsDisplay, []);
       }
       groups.get(wsDisplay).push(entry);
+    }
+    return groups;
+  }
+
+  /**
+   * 方案计划按修改时间分组 (今天 / 昨天 / 更早)
+   */
+  function groupPlansByDate(plans) {
+    const now = new Date();
+    const todayStr = dateKey(now);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = dateKey(yesterday);
+    const groups = new Map();
+
+    const sorted = [...plans].sort((a, b) => {
+      const ta = a.lastModifiedTime || '';
+      const tb = b.lastModifiedTime || '';
+      return tb.localeCompare(ta);
+    });
+
+    for (const plan of sorted) {
+      const ts = plan.lastModifiedTime;
+      let label = t('timeEarlier');
+      if (ts) {
+        try {
+          const d = new Date(ts);
+          const dk = dateKey(d);
+          if (dk === todayStr) {
+            label = t('timeToday');
+          } else if (dk === yesterdayStr) {
+            label = t('timeYesterday');
+          } else {
+            label = dk;
+          }
+        } catch {
+          label = t('timeEarlier');
+        }
+      }
+      if (!groups.has(label)) {
+        groups.set(label, []);
+      }
+      groups.get(label).push(plan);
+    }
+    return groups;
+  }
+
+  /**
+   * 方案计划按关联项目工作区分组
+   */
+  function groupPlansByWorkspace(plans) {
+    const groups = new Map();
+    const sorted = [...plans].sort((a, b) => {
+      const ta = a.lastModifiedTime || '';
+      const tb = b.lastModifiedTime || '';
+      return tb.localeCompare(ta);
+    });
+
+    for (const plan of sorted) {
+      let wsDisplay = t('noWorkspace');
+      if (plan.workspacePath) {
+        const clean = stripFileUri(plan.workspacePath);
+        const name = clean.split(/[\\\/]/).filter(Boolean).pop();
+        if (name) {
+          wsDisplay = name;
+        }
+      }
+      if (!groups.has(wsDisplay)) {
+        groups.set(wsDisplay, []);
+      }
+      groups.get(wsDisplay).push(plan);
     }
     return groups;
   }

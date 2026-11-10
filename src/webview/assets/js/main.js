@@ -5,7 +5,8 @@
  * 核心功能：
  * - 初始化 VS Code API 桥接
  * - 全局事件委托 (Event Delegation) 监听列表点击，消除数千个冗余监听器
- * - 顶栏检索输入防抖与选项卡切换
+ * - 顶栏检索输入防抖、日期/工作区分组切换与选项卡视图切换
+ * - 方案计划与对话历史双栏统一支持日期/工作区智能分组与折叠
  * - 处理宿主双向 IPC 消息通信 (setConversations, setPlans, optimisticDelete 等)
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
@@ -26,6 +27,14 @@
     window.AG_I18N.updateStaticTexts();
     showLoading();
     vscode.postMessage({ command: 'refresh' });
+  }
+
+  function renderCurrentView() {
+    if (state.activeTab === 'conversations') {
+      window.AG_Renderer.renderList();
+    } else {
+      window.AG_Renderer.renderPlansList();
+    }
   }
 
   function bindTopBarEvents() {
@@ -62,11 +71,7 @@
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           state.searchQuery = e.target.value.trim().toLowerCase();
-          if (state.activeTab === 'conversations') {
-            window.AG_Renderer.renderList();
-          } else {
-            window.AG_Renderer.renderPlansList();
-          }
+          renderCurrentView();
         }, 120);
       });
     }
@@ -78,7 +83,7 @@
         if (groupWorkspaceBtn) {
           groupWorkspaceBtn.classList.remove('active');
         }
-        window.AG_Renderer.renderList();
+        renderCurrentView();
       });
     }
 
@@ -89,14 +94,14 @@
         if (groupDateBtn) {
           groupDateBtn.classList.remove('active');
         }
-        window.AG_Renderer.renderList();
+        renderCurrentView();
       });
     }
 
     if (expandAllBtn) {
       expandAllBtn.addEventListener('click', () => {
         state.collapsedGroups.clear();
-        window.AG_Renderer.renderList();
+        renderCurrentView();
       });
     }
 
@@ -111,7 +116,7 @@
               state.collapsedGroups.add(group);
             }
           });
-          window.AG_Renderer.renderList();
+          renderCurrentView();
         }
       });
     }
@@ -159,7 +164,7 @@
         const lang = e.target.value;
         window.AG_I18N.setLanguage(lang);
         vscode.postMessage({ command: 'setLanguage', value: lang });
-        window.AG_Renderer.renderList();
+        renderCurrentView();
       });
     }
 
@@ -193,7 +198,6 @@
     const fieldLevelSelect = document.getElementById('field-level-select');
     const exportStrategySelect = document.getElementById('export-strategy-select');
     const singleExportModeSelect = document.getElementById('single-export-mode-select');
-    const segControls = document.querySelectorAll('.segmented-control');
 
     if (newTab === 'conversations') {
       tabConversationsBtn?.classList.add('active');
@@ -201,7 +205,6 @@
       if (searchInput) {
         searchInput.placeholder = t('searchPlaceholderConv');
       }
-      segControls.forEach((el) => (el.style.display = ''));
       if (exportAllBtn) {
         exportAllBtn.style.display = '';
       }
@@ -220,7 +223,6 @@
       if (searchInput) {
         searchInput.placeholder = t('searchPlaceholderPlan');
       }
-      segControls.forEach((el) => (el.style.display = 'none'));
       if (exportAllBtn) {
         exportAllBtn.style.display = 'none';
       }
@@ -238,7 +240,7 @@
     state.selectedConvIds.clear();
     state.selectedPlanIds.clear();
     window.AG_Batch.updateBatchBar();
-    window.AG_Renderer.renderList();
+    renderCurrentView();
   }
 
   function bindGlobalDelegatedEvents() {
@@ -258,7 +260,7 @@
           } else {
             state.collapsedGroups.add(group);
           }
-          window.AG_Renderer.renderList();
+          renderCurrentView();
         }
         return;
       }
@@ -434,11 +436,7 @@
         case 'setLanguage': {
           if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
             window.AG_I18N.setLanguage(msg.language);
-            if (state.activeTab === 'conversations') {
-              window.AG_Renderer.renderList();
-            } else {
-              window.AG_Renderer.renderPlansList();
-            }
+            renderCurrentView();
           }
           break;
         }

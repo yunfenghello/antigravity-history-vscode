@@ -10,6 +10,12 @@ All notable changes to the "Antigravity History" extension will be documented in
   - 规范建立 src/core/ 底层协议与扫描引擎层 (ls-client, discovery, recovery, parser, formatter, cache)、src/services/ 业务服务层 (plan-service) 与 src/utils/ 通用基础设施层 (i18n, path-utils)，消除扁平混乱的源码目录。
   - 前端脚本模块化拆分：将 1138 行的巨型闭包 panel.js 拆分为 js/i18n.js、js/utils.js、js/state.js、js/render-cards.js、js/batch-manager.js 与 js/main.js，实现单一职责与高内聚设计。
 
+### Added & UI Enhancement
+- **方案计划全维度支持日期与工作区分组智能折叠**：
+  - 方案计划卡片完全打通按修改时间分组（今天 / 昨天 / 更早）与按所属项目工作区分组的双模式切换，最新修改方案即刻置顶。
+  - 支持方案计划独立分组箭头折叠与展开，并无缝接入顶栏【全部展开】与【全部折叠】一键全局控制。
+  - 修复卡片与分组选择器样式类名匹配问题，彻底消除非批量模式下的复选框错位渲染与布局塌陷，全面恢复圆角边框与悬浮效果。
+
 ### Performance
 - **三级渐进式非阻塞流式刷新体系**：
   - 阶段一（毫秒级极速首屏）：优先基于内存与本地持久化缓存推送数据，面板打开与刷新首屏耗时由数百毫秒缩短至 5ms 以内，彻底消除界面白屏与等待感。
