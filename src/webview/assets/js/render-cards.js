@@ -26,33 +26,43 @@
   } = window.AG_Utils;
 
   /**
-   * 通用分组容器渲染器（对话历史与方案计划共享）
+   * 通用分组容器渲染器（对话历史与方案计划共享，包含单卡片异常隔离边界）
    *
    * @param {Map<string, Array>} groups 分组数据
    * @param {Function} renderItemCardFn 单项卡片渲染函数
    * @returns {string} 完整的 HTML 字符串
    */
   function renderGroupedContainer(groups, renderItemCardFn) {
-    const state = window.AG_State;
+    const state = window.AG_State || {};
+    const collapsedGroups = state.collapsedGroups || new Set();
     let html = '';
 
+    if (!groups || typeof groups.entries !== 'function') {
+      return html;
+    }
+
     for (const [groupLabel, items] of groups) {
-      const isCollapsed = state.collapsedGroups.has(groupLabel);
+      const isCollapsed = collapsedGroups.has(groupLabel);
       const arrow = isCollapsed ? '&#x25B6;' : '&#x25BC;';
+      const safeItems = Array.isArray(items) ? items : [];
 
       html += `<div class="date-group" data-group="${esc(groupLabel)}">`;
       html += `
         <div class="date-group-header" data-group="${esc(groupLabel)}">
           <span class="group-arrow">${arrow}</span>
           <span class="date-group-label">${esc(groupLabel)}</span>
-          <span class="date-group-count">(${items.length})</span>
+          <span class="date-group-count">(${safeItems.length})</span>
         </div>
       `;
 
       html += `<div class="group-items ${isCollapsed ? 'collapsed' : ''}">`;
       if (!isCollapsed) {
-        for (const item of items) {
-          html += renderItemCardFn(item);
+        for (const item of safeItems) {
+          try {
+            html += renderItemCardFn(item);
+          } catch (cardErr) {
+            console.error('[AG] 单项卡片渲染异常已安全隔离:', cardErr, item);
+          }
         }
       }
       html += `</div></div>`;
@@ -62,7 +72,7 @@
   }
 
   /**
-   * 渲染【对话历史】列表
+   * 渲染【对话历史】列表 (全链路安全兜底保障)
    */
   function renderList() {
     const listContainer = document.getElementById('list-container');
@@ -71,76 +81,86 @@
       return;
     }
 
-    const state = window.AG_State;
+    const state = window.AG_State || {};
     if (state.activeTab === 'plans') {
       renderPlansList();
       return;
     }
 
-    renderExportPathBar();
+    try {
+      renderExportPathBar();
 
-    const entries = Object.entries(state.conversations || {});
-    if (entries.length === 0) {
-      listContainer.innerHTML = buildEmptyStateHtml('&#x1F4AC;', t('emptyTitle'), t('emptyDesc'));
-      if (statsBar) {
-        statsBar.textContent = '';
+      const rawConversations = state.conversations || {};
+      const entries = Object.entries(rawConversations);
+      if (entries.length === 0) {
+        listContainer.innerHTML = buildEmptyStateHtml('&#x1F4AC;', t('emptyTitle'), t('emptyDesc'));
+        if (statsBar) {
+          statsBar.textContent = '';
+        }
+        return;
       }
-      return;
-    }
 
-    // 搜索过滤
-    let filtered = entries;
-    const query = (state.searchQuery || '').toLowerCase().trim();
-    if (query) {
-      filtered = entries.filter(([id, info]) => {
-        const sum = (info.summary || '').toLowerCase();
-        const ws = (info.workspaces || [])
-          .map((w) => (w.workspaceFolderAbsoluteUri || '').toLowerCase())
-          .join(' ');
-        return sum.includes(query) || id.toLowerCase().includes(query) || ws.includes(query);
-      });
-    }
+      // 搜索过滤
+      let filtered = entries;
+      const query = (state.searchQuery || '').toLowerCase().trim();
+      if (query) {
+        filtered = entries.filter(([id, info]) => {
+          if (!info) return false;
+          const sum = (info.summary || '').toLowerCase();
+          const ws = (info.workspaces || [])
+            .map((w) => (w?.workspaceFolderAbsoluteUri || '').toLowerCase())
+            .join(' ');
+          return sum.includes(query) || (id && id.toLowerCase().includes(query)) || ws.includes(query);
+        });
+      }
 
-    // 统计状态更新
-    if (statsBar) {
-      statsBar.textContent =
-        filtered.length !== entries.length
-          ? t('totalConversations', filtered.length, entries.length)
-          : t('totalCountOnly', entries.length);
-    }
+      // 统计状态更新
+      if (statsBar) {
+        statsBar.textContent =
+          filtered.length !== entries.length
+            ? t('totalConversations', filtered.length, entries.length)
+            : t('totalCountOnly', entries.length);
+      }
 
-    if (filtered.length === 0) {
-      listContainer.innerHTML = buildEmptyStateHtml('&#x1F50D;', t('noResultsTitle', esc(query)), t('noResultsDesc'));
-      return;
-    }
+      if (filtered.length === 0) {
+        listContainer.innerHTML = buildEmptyStateHtml('&#x1F50D;', t('noResultsTitle', esc(query)), t('noResultsDesc'));
+        return;
+      }
 
-    // 调用公共分组器
-    const groups =
-      state.groupBy === 'workspace'
-        ? groupItemsByWorkspace(
-            filtered,
-            (e) => (e[1].workspaces?.[0]?.workspaceFolderAbsoluteUri) || '',
-            (e) => e[1].lastModifiedTime || e[1].createdTime || '',
-          )
-        : groupItemsByDate(filtered, (e) => e[1].lastModifiedTime || e[1].createdTime || '');
+      // 调用公共分组器
+      const groups =
+        state.groupBy === 'workspace'
+          ? groupItemsByWorkspace(
+              filtered,
+              (e) => e?.[1]?.workspaces?.[0]?.workspaceFolderAbsoluteUri || '',
+              (e) => e?.[1]?.lastModifiedTime || e?.[1]?.createdTime || '',
+            )
+          : groupItemsByDate(filtered, (e) => e?.[1]?.lastModifiedTime || e?.[1]?.createdTime || '');
 
-    listContainer.innerHTML = renderGroupedContainer(groups, (entry) => renderCard(entry[0], entry[1]));
+      listContainer.innerHTML = renderGroupedContainer(groups, (entry) => renderCard(entry[0], entry[1]));
 
-    if (window.AG_Batch) {
-      window.AG_Batch.updateBatchBar();
+      if (window.AG_Batch && typeof window.AG_Batch.updateBatchBar === 'function') {
+        window.AG_Batch.updateBatchBar();
+      }
+    } catch (err) {
+      console.error('[AG] renderList 列表渲染异常:', err);
+      listContainer.innerHTML = buildEmptyStateHtml('&#x26A0;', t('errorTitle'), err && err.message ? err.message : String(err));
     }
   }
 
   /**
-   * 构造单张会话卡片 HTML
+   * 构造单张会话卡片 HTML (防空指针与异常防护)
    */
   function renderCard(cascadeId, info) {
-    const state = window.AG_State;
+    if (!info) {
+      info = {};
+    }
+    const state = window.AG_State || {};
     const title = info.summary || t('unnamedConv');
     const stepCount = info.stepCount !== undefined ? info.stepCount : '?';
     const time = formatTime(info.lastModifiedTime || info.createdTime);
     const statusDot = getStatusDot(info.status || '');
-    const isSelected = state.selectedConvIds.has(cascadeId);
+    const isSelected = state.selectedConvIds ? state.selectedConvIds.has(cascadeId) : false;
 
     const wsUri = info.workspaces?.[0]?.workspaceFolderAbsoluteUri || '';
     const wsDisplay = wsUri ? toWinPath(stripFileUri(wsUri)) : '';
@@ -176,70 +196,87 @@
   }
 
   /**
-   * 渲染【方案计划】列表 (无缝复用分组渲染器与公共分组算法)
+   * 渲染【方案计划】列表 (无缝复用分组渲染器与公共分组算法，全链路异常安全)
    */
   function renderPlansList() {
     const listContainer = document.getElementById('list-container');
     const statsBar = document.getElementById('stats-bar');
-    const state = window.AG_State;
+    if (!listContainer) {
+      return;
+    }
 
-    renderExportPathBar();
+    const state = window.AG_State || {};
 
-    const plans = state.plans || [];
-    if (plans.length === 0) {
-      listContainer.innerHTML = buildEmptyStateHtml('&#x1F4DD;', t('emptyPlanTitle'), t('emptyPlanDesc'));
-      if (statsBar) {
-        statsBar.textContent = '';
+    try {
+      // 方案计划面板下清理会话导出路径提示栏，消除视觉干扰
+      const exportBar = document.getElementById('export-path-bar');
+      if (exportBar) {
+        exportBar.innerHTML = '';
       }
-      return;
-    }
 
-    let filtered = plans;
-    const query = (state.searchQuery || '').toLowerCase().trim();
-    if (query) {
-      filtered = plans.filter((p) => {
-        const title = (p.title || '').toLowerCase();
-        const ws = (p.workspacePath || '').toLowerCase();
-        const id = (p.id || '').toLowerCase();
-        return title.includes(query) || ws.includes(query) || id.includes(query);
-      });
-    }
+      const plans = Array.isArray(state.plans) ? state.plans : [];
+      if (plans.length === 0) {
+        listContainer.innerHTML = buildEmptyStateHtml('&#x1F4DD;', t('emptyPlanTitle'), t('emptyPlanDesc'));
+        if (statsBar) {
+          statsBar.textContent = '';
+        }
+        return;
+      }
 
-    if (statsBar) {
-      statsBar.textContent =
-        filtered.length !== plans.length
-          ? t('totalPlans', filtered.length, plans.length)
-          : t('totalPlansCountOnly', plans.length);
-    }
+      let filtered = plans;
+      const query = (state.searchQuery || '').toLowerCase().trim();
+      if (query) {
+        filtered = plans.filter((p) => {
+          if (!p) return false;
+          const title = (p.title || '').toLowerCase();
+          const ws = (p.workspacePath || '').toLowerCase();
+          const id = (p.id || '').toLowerCase();
+          return title.includes(query) || ws.includes(query) || id.includes(query);
+        });
+      }
 
-    if (filtered.length === 0) {
-      listContainer.innerHTML = buildEmptyStateHtml('&#x1F50D;', t('noResultsTitle', esc(query)), t('noResultsDesc'));
-      return;
-    }
+      if (statsBar) {
+        statsBar.textContent =
+          filtered.length !== plans.length
+            ? t('totalPlans', filtered.length, plans.length)
+            : t('totalPlansCountOnly', plans.length);
+      }
 
-    // 调用公共分组器（与会话列表完全复用同一套通用逻辑）
-    const groups =
-      state.groupBy === 'workspace'
-        ? groupItemsByWorkspace(filtered, (p) => p.workspacePath || '', (p) => p.lastModifiedTime || '')
-        : groupItemsByDate(filtered, (p) => p.lastModifiedTime || '');
+      if (filtered.length === 0) {
+        listContainer.innerHTML = buildEmptyStateHtml('&#x1F50D;', t('noResultsTitle', esc(query)), t('noResultsDesc'));
+        return;
+      }
 
-    listContainer.innerHTML = renderGroupedContainer(groups, (plan) => renderPlanCard(plan));
+      // 调用公共分组器（与会话列表完全复用同一套通用逻辑）
+      const groups =
+        state.groupBy === 'workspace'
+          ? groupItemsByWorkspace(filtered, (p) => p?.workspacePath || '', (p) => p?.lastModifiedTime || '')
+          : groupItemsByDate(filtered, (p) => p?.lastModifiedTime || '');
 
-    if (window.AG_Batch) {
-      window.AG_Batch.updateBatchBar();
+      listContainer.innerHTML = renderGroupedContainer(groups, (plan) => renderPlanCard(plan));
+
+      if (window.AG_Batch && typeof window.AG_Batch.updateBatchBar === 'function') {
+        window.AG_Batch.updateBatchBar();
+      }
+    } catch (err) {
+      console.error('[AG] renderPlansList 方案计划渲染异常:', err);
+      listContainer.innerHTML = buildEmptyStateHtml('&#x26A0;', t('errorTitle'), err && err.message ? err.message : String(err));
     }
   }
 
   /**
-   * 构造单张方案计划卡片 HTML
+   * 构造单张方案计划卡片 HTML (防空指针与异常防护)
    */
   function renderPlanCard(plan) {
-    const state = window.AG_State;
+    if (!plan) {
+      plan = {};
+    }
+    const state = window.AG_State || {};
     const title = plan.title || t('unnamedPlan');
     const time = formatTime(plan.lastModifiedTime);
     const wsDisplay = plan.workspacePath ? toWinPath(plan.workspacePath) : t('noWorkspace');
     const wsTooltip = t('openFolderTooltip', wsDisplay);
-    const isSelected = state.selectedPlanIds.has(plan.id);
+    const isSelected = state.selectedPlanIds ? state.selectedPlanIds.has(plan.id) : false;
 
     const wsHtml = plan.workspacePath
       ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
@@ -247,9 +284,10 @@
 
     let badgesHtml = '<div class="artifact-badge-group">';
     for (const art of plan.artifacts || []) {
+      if (!art) continue;
       const isMain = art.fileName === 'implementation_plan.md';
-      const tooltip = t('saveArtifactTooltip', art.label, art.fileName);
-      badgesHtml += `<button class="artifact-badge ${isMain ? 'primary' : ''}" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="${esc(art.fileName)}" title="${esc(tooltip)}"><span class="badge-icon">&#x2193;</span> ${esc(art.label)} (${esc(art.fileName)})</button>`;
+      const tooltip = t('saveArtifactTooltip', art.label || art.fileName, art.fileName);
+      badgesHtml += `<button class="artifact-badge ${isMain ? 'primary' : ''}" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="${esc(art.fileName)}" title="${esc(tooltip)}"><span class="badge-icon">&#x2193;</span> ${esc(art.label || art.fileName)} (${esc(art.fileName)})</button>`;
     }
     badgesHtml += '</div>';
 
@@ -261,14 +299,14 @@
         <div class="conv-icon"><span class="status-dot active">&#x25CF;</span></div>
         <div class="conv-info">
           <div class="conv-title" style="font-weight:600;font-size:14px;" title="${esc(title)}">${esc(title)}</div>
-          <div class="conv-meta">${time} · ID: ${esc(plan.id.slice(0, 8))}...</div>
+          <div class="conv-meta">${time} · ID: ${esc(plan.id ? plan.id.slice(0, 8) : '–')}...</div>
           ${wsHtml}
           ${badgesHtml}
         </div>
         <div class="conv-actions">
           <button class="btn btn-primary btn-sm" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="implementation_plan.md" title="${esc(t('savePlanTooltip'))}">${esc(t('savePlanBtn'))}</button>
           <button class="btn btn-secondary btn-sm" data-action="exportPlanAll" data-plan-id="${esc(plan.id)}" title="${esc(t('saveAllArtifactsTooltip'))}">${esc(t('saveAllArtifactsBtn'))}</button>
-          <button class="btn-export" data-action="openPlanFolder" data-path="${esc(plan.dirPath)}" title="${esc(t('openPlanSourceTooltip'))}">${esc(t('openSourceFolderBtn'))}</button>
+          <button class="btn-export" data-action="openPlanFolder" data-path="${esc(plan.dirPath || '')}" title="${esc(t('openPlanSourceTooltip'))}">${esc(t('openSourceFolderBtn'))}</button>
           <button class="btn-export btn-danger-action" data-action="deletePlan" data-plan-id="${esc(plan.id)}" title="${esc(t('deletePlanTooltip'))}">${esc(t('deletePlanBtn'))}</button>
         </div>
       </div>

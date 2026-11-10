@@ -136,6 +136,7 @@ export function refreshPanel(): void {
  */
 async function routeWebviewMessage(message: WebviewIncomingMessage): Promise<void> {
   switch (message.command) {
+    case 'webviewReady':
     case 'refresh':
       await runProgressiveRefresh(state, postWebviewMessage);
       break;

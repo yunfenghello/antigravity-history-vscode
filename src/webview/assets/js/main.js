@@ -83,15 +83,11 @@
       console.error('[AG] 更新多语言静态文本失败:', e);
     }
 
-    // 触发统一流式刷新
+    // 主动向宿主发送就绪握手信号，触发数据下发
     try {
-      if (getVC().handleRefresh) {
-        getVC().handleRefresh();
-      } else {
-        vscode.postMessage({ command: 'refresh' });
-      }
+      vscode.postMessage({ command: 'webviewReady' });
     } catch (e) {
-      console.error('[AG] 触发刷新失败:', e);
+      console.error('[AG] 发送就绪握手失败:', e);
       vscode.postMessage({ command: 'refresh' });
     }
   }
@@ -317,117 +313,145 @@
   }
 
   /**
-   * 监听 VS Code 宿主下发的双向 IPC 消息
+   * 监听 VS Code 宿主下发的双向 IPC 消息 (全面异常防御)
    */
   function bindIpcMessages() {
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (!msg) return;
 
-      switch (msg.command) {
-        case 'setConversations': {
-          state.conversations = msg.data || {};
-          if (msg.convDir) {
-            state.convDataDir = msg.convDir;
-          }
-          for (const cid of Array.from(state.selectedConvIds)) {
-            if (!state.conversations[cid]) {
-              state.selectedConvIds.delete(cid);
+      try {
+        switch (msg.command) {
+          case 'setConversations': {
+            state.conversations = msg.data || {};
+            if (msg.convDir) {
+              state.convDataDir = msg.convDir;
             }
-          }
-          window.AG_Batch?.updateBatchBar();
-          if (state.activeTab === 'conversations') {
-            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
-          }
-          break;
-        }
-        case 'setPlans': {
-          state.plans = msg.plans || [];
-          for (const pid of Array.from(state.selectedPlanIds)) {
-            if (!state.plans.some((p) => p.id === pid)) {
-              state.selectedPlanIds.delete(pid);
+            if (state.selectedConvIds) {
+              for (const cid of Array.from(state.selectedConvIds)) {
+                if (!state.conversations[cid]) {
+                  state.selectedConvIds.delete(cid);
+                }
+              }
             }
-          }
-          window.AG_Batch?.updateBatchBar();
-          if (state.activeTab === 'plans') {
-            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
-          }
-          break;
-        }
-        case 'setExportPath': {
-          state.exportPath = msg.path || '';
-          window.AG_Renderer?.renderExportPathBar();
-          break;
-        }
-        case 'setExportStrategy': {
-          const el = document.getElementById('export-strategy-select');
-          if (el && msg.strategy) {
-            el.value = msg.strategy;
-          }
-          break;
-        }
-        case 'setSingleExportMode': {
-          const el = document.getElementById('single-export-mode-select');
-          if (el && msg.mode) {
-            el.value = msg.mode;
-          }
-          break;
-        }
-        case 'setLanguage': {
-          if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
-            window.AG_I18N?.setLanguage?.(msg.language);
-            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
-          }
-          break;
-        }
-        case 'recoverProgress': {
-          showRecoverBanner(msg.done, msg.total);
-          break;
-        }
-        case 'recoverDone': {
-          hideRecoverBanner();
-          if (msg.activated > 0) {
-            showToast(t('recoverDone', msg.activated));
-          }
-          break;
-        }
-        case 'optimisticDeleteConvs': {
-          if (Array.isArray(msg.cascadeIds)) {
-            for (const cid of msg.cascadeIds) {
-              delete state.conversations[cid];
-              state.selectedConvIds.delete(cid);
+            try {
+              window.AG_Batch?.updateBatchBar?.();
+            } catch (err) {
+              console.warn('[AG] updateBatchBar 轻微警告:', err);
             }
-            window.AG_Batch?.updateBatchBar();
             if (state.activeTab === 'conversations') {
               getVC().renderCurrentView ? getVC().renderCurrentView() : null;
             }
+            break;
           }
-          break;
-        }
-        case 'optimisticDeletePlans': {
-          if (Array.isArray(msg.planIds)) {
-            const deleteSet = new Set(msg.planIds);
-            state.plans = (state.plans || []).filter((p) => !deleteSet.has(p.id));
-            for (const pid of msg.planIds) {
-              state.selectedPlanIds.delete(pid);
+          case 'setPlans': {
+            state.plans = Array.isArray(msg.plans) ? msg.plans : [];
+            if (state.selectedPlanIds) {
+              for (const pid of Array.from(state.selectedPlanIds)) {
+                if (!state.plans.some((p) => p.id === pid)) {
+                  state.selectedPlanIds.delete(pid);
+                }
+              }
             }
-            window.AG_Batch?.updateBatchBar();
+            try {
+              window.AG_Batch?.updateBatchBar?.();
+            } catch (err) {
+              console.warn('[AG] updateBatchBar 轻微警告:', err);
+            }
             if (state.activeTab === 'plans') {
               getVC().renderCurrentView ? getVC().renderCurrentView() : null;
             }
+            break;
           }
-          break;
-        }
-        case 'toast': {
-          if (msg.text) {
-            showToast(msg.text);
+          case 'setExportPath': {
+            state.exportPath = msg.path || '';
+            try {
+              window.AG_Renderer?.renderExportPathBar?.();
+            } catch (err) {
+              console.warn('[AG] renderExportPathBar 轻微警告:', err);
+            }
+            break;
           }
-          break;
+          case 'setExportStrategy': {
+            const el = document.getElementById('export-strategy-select');
+            if (el && msg.strategy) {
+              el.value = msg.strategy;
+            }
+            break;
+          }
+          case 'setSingleExportMode': {
+            const el = document.getElementById('single-export-mode-select');
+            if (el && msg.mode) {
+              el.value = msg.mode;
+            }
+            break;
+          }
+          case 'setLanguage': {
+            if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
+              window.AG_I18N?.setLanguage?.(msg.language);
+              getVC().renderCurrentView ? getVC().renderCurrentView() : null;
+            }
+            break;
+          }
+          case 'recoverProgress': {
+            showRecoverBanner(msg.done, msg.total);
+            break;
+          }
+          case 'recoverDone': {
+            hideRecoverBanner();
+            if (msg.activated > 0) {
+              showToast(t('recoverDone', msg.activated));
+            }
+            break;
+          }
+          case 'optimisticDeleteConvs': {
+            if (Array.isArray(msg.cascadeIds)) {
+              for (const cid of msg.cascadeIds) {
+                delete state.conversations[cid];
+                state.selectedConvIds?.delete(cid);
+              }
+              try {
+                window.AG_Batch?.updateBatchBar?.();
+              } catch (err) {
+                console.warn('[AG] updateBatchBar 轻微警告:', err);
+              }
+              if (state.activeTab === 'conversations') {
+                getVC().renderCurrentView ? getVC().renderCurrentView() : null;
+              }
+            }
+            break;
+          }
+          case 'optimisticDeletePlans': {
+            if (Array.isArray(msg.planIds)) {
+              const deleteSet = new Set(msg.planIds);
+              state.plans = (state.plans || []).filter((p) => !deleteSet.has(p.id));
+              for (const pid of msg.planIds) {
+                state.selectedPlanIds?.delete(pid);
+              }
+              try {
+                window.AG_Batch?.updateBatchBar?.();
+              } catch (err) {
+                console.warn('[AG] updateBatchBar 轻微警告:', err);
+              }
+              if (state.activeTab === 'plans') {
+                getVC().renderCurrentView ? getVC().renderCurrentView() : null;
+              }
+            }
+            break;
+          }
+          case 'toast': {
+            if (msg.text) {
+              showToast(msg.text);
+            }
+            break;
+          }
+          case 'error': {
+            showError(msg.text);
+            break;
+          }
         }
-        case 'error': {
-          showError(msg.text);
-          break;
-        }
+      } catch (ipcErr) {
+        console.error('[AG] IPC 消息处理发生异常:', ipcErr, msg);
       }
     });
   }

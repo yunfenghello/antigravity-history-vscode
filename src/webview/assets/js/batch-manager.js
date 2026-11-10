@@ -19,11 +19,12 @@
   /**
    * 获取当前激活选项卡对应的选中 ID 集合 (Single Selection Target)
    *
-   * @returns {Set<string>} 选中的 ID 集合
+   * @returns {Set<string>} 选中的 ID 集合 (始终保证返回安全 Set 实例)
    */
   function getActiveSelectedSet() {
-    const state = window.AG_State;
-    return state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    const state = window.AG_State || {};
+    const set = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    return set instanceof Set ? set : new Set();
   }
 
   function renderView() {
@@ -31,7 +32,7 @@
       window.AG_ViewController.renderCurrentView();
       return;
     }
-    const state = window.AG_State;
+    const state = window.AG_State || {};
     if (window.AG_Renderer) {
       if (state.activeTab === 'conversations') {
         window.AG_Renderer.renderList();
@@ -42,41 +43,45 @@
   }
 
   function updateBatchBar() {
-    const state = window.AG_State;
-    const batchToolbar = document.getElementById('batch-toolbar');
-    const toggleBatchBtn = document.getElementById('btn-toggle-batch');
-    const batchSelectedCount = document.getElementById('batch-selected-count');
-    const batchDeleteBtn = document.getElementById('btn-batch-delete');
+    try {
+      const state = window.AG_State || {};
+      const batchToolbar = document.getElementById('batch-toolbar');
+      const toggleBatchBtn = document.getElementById('btn-toggle-batch');
+      const batchSelectedCount = document.getElementById('batch-selected-count');
+      const batchDeleteBtn = document.getElementById('btn-batch-delete');
 
-    if (!batchToolbar || !toggleBatchBtn) {
-      return;
-    }
-
-    if (state.isBatchMode) {
-      batchToolbar.style.display = 'flex';
-      toggleBatchBtn.classList.add('active');
-      toggleBatchBtn.textContent = t('exitBatchModeBtn');
-    } else {
-      batchToolbar.style.display = 'none';
-      toggleBatchBtn.classList.remove('active');
-      toggleBatchBtn.textContent = t('batchModeBtn');
-    }
-
-    const selectedSet = getActiveSelectedSet();
-    const count = selectedSet.size;
-
-    if (batchSelectedCount) {
-      batchSelectedCount.textContent = t('selectedCount', count);
-    }
-
-    if (batchDeleteBtn) {
-      if (count > 0) {
-        batchDeleteBtn.disabled = false;
-        batchDeleteBtn.textContent = t('batchDeleteWithCount', count);
-      } else {
-        batchDeleteBtn.disabled = true;
-        batchDeleteBtn.textContent = t('batchDeleteBtn');
+      if (!batchToolbar || !toggleBatchBtn) {
+        return;
       }
+
+      if (state.isBatchMode) {
+        batchToolbar.style.display = 'flex';
+        toggleBatchBtn.classList.add('active');
+        toggleBatchBtn.textContent = t('exitBatchModeBtn');
+      } else {
+        batchToolbar.style.display = 'none';
+        toggleBatchBtn.classList.remove('active');
+        toggleBatchBtn.textContent = t('batchModeBtn');
+      }
+
+      const selectedSet = getActiveSelectedSet();
+      const count = selectedSet.size;
+
+      if (batchSelectedCount) {
+        batchSelectedCount.textContent = t('selectedCount', count);
+      }
+
+      if (batchDeleteBtn) {
+        if (count > 0) {
+          batchDeleteBtn.disabled = false;
+          batchDeleteBtn.textContent = t('batchDeleteWithCount', count);
+        } else {
+          batchDeleteBtn.disabled = true;
+          batchDeleteBtn.textContent = t('batchDeleteBtn');
+        }
+      }
+    } catch (err) {
+      console.warn('[AG] updateBatchBar 安全拦截:', err);
     }
   }
 

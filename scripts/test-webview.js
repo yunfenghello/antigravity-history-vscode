@@ -141,6 +141,10 @@ sendHostMessage({
   convDir: 'e:\\conversations',
 });
 
+const listContainerEl = mockDoc.getElementById('list-container');
+console.log('收到 setConversations 后的 listContainer 长度:', listContainerEl.innerHTML.length);
+console.log('收到 setConversations 后的 statsBar:', mockDoc.getElementById('stats-bar').textContent);
+
 // 模拟发送 setPlans
 sendHostMessage({
   command: 'setPlans',

@@ -24,10 +24,17 @@
     if (!window.AG_Renderer) {
       return;
     }
-    if (state.activeTab === 'plans') {
-      window.AG_Renderer.renderPlansList();
-    } else {
-      window.AG_Renderer.renderList();
+    try {
+      if (state.activeTab === 'plans') {
+        window.AG_Renderer.renderPlansList();
+      } else {
+        window.AG_Renderer.renderList();
+      }
+    } catch (err) {
+      console.error('[AG] renderCurrentView 渲染异常:', err);
+      if (window.AG_Utils && typeof window.AG_Utils.showError === 'function') {
+        window.AG_Utils.showError(err && err.message ? err.message : String(err));
+      }
     }
   }
 
@@ -43,7 +50,13 @@
       }, 600);
     }
 
-    if (window.AG_Utils && typeof window.AG_Utils.showLoading === 'function') {
+    const state = window.AG_State;
+    const hasData =
+      (state.activeTab === 'conversations' && state.conversations && Object.keys(state.conversations).length > 0) ||
+      (state.activeTab === 'plans' && state.plans && state.plans.length > 0);
+
+    // 仅在当前视图完全无任何卡片数据时才展示全屏加载动画，已有内容时杜绝暴力抹除
+    if (!hasData && window.AG_Utils && typeof window.AG_Utils.showLoading === 'function') {
       window.AG_Utils.showLoading();
     }
 

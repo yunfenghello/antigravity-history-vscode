@@ -5,6 +5,13 @@ All notable changes to the "Antigravity History" extension will be documented in
 ## [0.3.5] - 2026-11-10
 
 ### Fixed & Robustness
+- **彻底根除前端卡在 Loading（正在扫描并同步最新数据...）问题**：
+  - 重构刷新调度逻辑，消除加载状态时序覆盖死锁：优化 `view-controller.js` 中的 `handleRefresh()`，仅在当前视图无任何卡片数据时才展示全屏加载动画，已有内容时仅触发按钮旋转动效，杜绝已渲染卡片被再次暴力抹除。
+  - 建立可靠的端到端就绪握手机制（Ready Handshake）：Webview 前端加载并绑定事件后主动向宿主投递 `webviewReady` 信号，宿主接收后即刻投递首屏数据，彻底解决因 Webview 尚未初始化导致首屏消息丢失的顽疾。
+  - 为卡片列表渲染装载企业级容错隔离（Card Error Boundary）：`renderList()` 与 `renderPlansList()` 增加全流程异常兜底，对每张单卡片在装载时提供隔离保护，个别异常字段绝不影响整体列表正常展示。
+- **加固双面板（对话历史 / 方案计划）平滑无阻切换**：
+  - 增强 `switchTab` 容错控制，平滑同步与清空已选条目状态，消除切换时的批量栏空指针隐患。
+  - 方案计划面板下自动隐藏会话专用导出路径提示栏，空数据状态下展示标准空状态插画与提示，绝不出现挂起或白屏。
 - **Webview 多脚本时序竞态彻底修复与产物单文件化编译**：
   - 源码保持 `src/webview/assets/js/` 目录下的清晰微模块拆分（`i18n`, `utils`, `state`, `render-cards`, `batch-manager`, `view-controller`, `main`）。
   - 在 `esbuild.js` 构建流水线中引入聚合编译机制，按确定依赖拓扑顺序输出单一生产级脚本 `dist/webview/panel.js`，彻底消除 VS Code 虚拟协议跨进程读取多个外链脚本引发的未就绪竞态与选项卡切换受阻问题。

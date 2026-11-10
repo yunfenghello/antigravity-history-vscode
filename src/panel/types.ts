@@ -31,6 +31,7 @@ export interface RefreshContext {
  * Webview 发往 VS Code 扩展宿主的消息契约
  */
 export type WebviewIncomingMessage =
+  | { command: 'webviewReady' }
   | { command: 'refresh' }
   | { command: 'refreshPlans' }
   | { command: 'export'; cascadeId: string; format: 'md' | 'json' | 'all' }

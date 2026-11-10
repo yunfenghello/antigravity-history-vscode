@@ -24,7 +24,7 @@
   }
 
   function stripFileUri(uri) {
-    if (!uri) {
+    if (!uri || typeof uri !== 'string') {
       return '';
     }
     let p = uri.replace(/^file:\/\/\//i, '').replace(/^file:\/\//i, '');
@@ -36,7 +36,7 @@
   }
 
   function toWinPath(p) {
-    if (!p) {
+    if (!p || typeof p !== 'string') {
       return '';
     }
     return p.replace(/\//g, '\\');
