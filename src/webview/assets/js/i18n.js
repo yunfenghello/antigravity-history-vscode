@@ -235,21 +235,21 @@
     }
 
     const stratSelect = document.getElementById('export-strategy-select');
-    if (stratSelect && stratSelect.options.length >= 2) {
+    if (stratSelect && stratSelect.options && stratSelect.options.length >= 2) {
       stratSelect.title = t('strategyTitle');
       stratSelect.options[0].text = t('strategyWorkspace');
       stratSelect.options[1].text = t('strategyUnified');
     }
 
     const singleSelect = document.getElementById('single-export-mode-select');
-    if (singleSelect && singleSelect.options.length >= 2) {
+    if (singleSelect && singleSelect.options && singleSelect.options.length >= 2) {
       singleSelect.title = t('singleExportModeTitle');
       singleSelect.options[0].text = t('singleExportDialog');
       singleSelect.options[1].text = t('singleExportDirect');
     }
 
     const fieldSelect = document.getElementById('field-level-select');
-    if (fieldSelect && fieldSelect.options.length >= 3) {
+    if (fieldSelect && fieldSelect.options && fieldSelect.options.length >= 3) {
       fieldSelect.title = t('fieldLevelTitle');
       fieldSelect.options[0].text = t('fieldDefault');
       fieldSelect.options[1].text = t('fieldThinking');

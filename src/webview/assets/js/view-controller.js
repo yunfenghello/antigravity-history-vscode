@@ -141,7 +141,7 @@
   }
 
   /**
-   * 统一选项卡面板切换调度
+   * 统一选项卡面板切换调度 (加固防御性设计)
    *
    * @param {'conversations' | 'plans'} targetTab 目标选项卡
    */
@@ -152,57 +152,73 @@
     }
     state.activeTab = targetTab;
 
-    const tabConversationsBtn = document.getElementById('tab-conversations');
-    const tabPlansBtn = document.getElementById('tab-plans');
-    const searchInput = document.getElementById('search-input');
-    const exportAllBtn = document.getElementById('btn-export-all');
-    const fieldLevelSelect = document.getElementById('field-level-select');
-    const exportStrategySelect = document.getElementById('export-strategy-select');
-    const singleExportModeSelect = document.getElementById('single-export-mode-select');
+    try {
+      const tabConversationsBtn = document.getElementById('tab-conversations');
+      const tabPlansBtn = document.getElementById('tab-plans');
+      const searchInput = document.getElementById('search-input');
+      const exportAllBtn = document.getElementById('btn-export-all');
+      const fieldLevelSelect = document.getElementById('field-level-select');
+      const exportStrategySelect = document.getElementById('export-strategy-select');
+      const singleExportModeSelect = document.getElementById('single-export-mode-select');
 
-    if (targetTab === 'conversations') {
-      tabConversationsBtn?.classList.add('active');
-      tabPlansBtn?.classList.remove('active');
-      if (searchInput) {
-        searchInput.placeholder = t('searchPlaceholderConv');
+      if (targetTab === 'conversations') {
+        tabConversationsBtn?.classList.add('active');
+        tabPlansBtn?.classList.remove('active');
+        if (searchInput) {
+          searchInput.placeholder = t('searchPlaceholderConv');
+        }
+        if (exportAllBtn) {
+          exportAllBtn.style.display = '';
+        }
+        if (fieldLevelSelect) {
+          fieldLevelSelect.style.display = '';
+        }
+        if (exportStrategySelect) {
+          exportStrategySelect.style.display = '';
+        }
+        if (singleExportModeSelect) {
+          singleExportModeSelect.style.display = '';
+        }
+      } else {
+        tabPlansBtn?.classList.add('active');
+        tabConversationsBtn?.classList.remove('active');
+        if (searchInput) {
+          searchInput.placeholder = t('searchPlaceholderPlan');
+        }
+        if (exportAllBtn) {
+          exportAllBtn.style.display = 'none';
+        }
+        if (fieldLevelSelect) {
+          fieldLevelSelect.style.display = 'none';
+        }
+        if (exportStrategySelect) {
+          exportStrategySelect.style.display = 'none';
+        }
+        if (singleExportModeSelect) {
+          singleExportModeSelect.style.display = 'none';
+        }
       }
-      if (exportAllBtn) {
-        exportAllBtn.style.display = '';
-      }
-      if (fieldLevelSelect) {
-        fieldLevelSelect.style.display = '';
-      }
-      if (exportStrategySelect) {
-        exportStrategySelect.style.display = '';
-      }
-      if (singleExportModeSelect) {
-        singleExportModeSelect.style.display = '';
-      }
-    } else {
-      tabPlansBtn?.classList.add('active');
-      tabConversationsBtn?.classList.remove('active');
-      if (searchInput) {
-        searchInput.placeholder = t('searchPlaceholderPlan');
-      }
-      if (exportAllBtn) {
-        exportAllBtn.style.display = 'none';
-      }
-      if (fieldLevelSelect) {
-        fieldLevelSelect.style.display = 'none';
-      }
-      if (exportStrategySelect) {
-        exportStrategySelect.style.display = 'none';
-      }
-      if (singleExportModeSelect) {
-        singleExportModeSelect.style.display = 'none';
-      }
+    } catch (e) {
+      console.warn('[AG] switchTab DOM 切换出现轻微异常:', e);
     }
 
     state.selectedConvIds.clear();
     state.selectedPlanIds.clear();
-    if (window.AG_Batch) {
+    if (window.AG_Batch && typeof window.AG_Batch.updateBatchBar === 'function') {
       window.AG_Batch.updateBatchBar();
     }
+
+    // 主动检查并拉取数据，防止首次初始化丢失
+    if (targetTab === 'plans' && (!state.plans || state.plans.length === 0)) {
+      if (window.AG_VSCODE) {
+        window.AG_VSCODE.postMessage({ command: 'refreshPlans' });
+      }
+    } else if (targetTab === 'conversations' && (!state.conversations || Object.keys(state.conversations).length === 0)) {
+      if (window.AG_VSCODE) {
+        window.AG_VSCODE.postMessage({ command: 'refresh' });
+      }
+    }
+
     renderCurrentView();
   }
 
@@ -217,3 +233,4 @@
     switchTab,
   };
 })(window);
+

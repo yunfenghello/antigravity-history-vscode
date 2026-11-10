@@ -6,14 +6,52 @@ const { join } = require('path');
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
-/** Copy webview assets (HTML/CSS/JS) to dist/ */
+/** Copy and bundle webview assets (HTML/CSS/JS) to dist/ */
 function copyWebviewAssets() {
   const src = join(__dirname, 'src', 'webview', 'assets');
   const dest = join(__dirname, 'dist', 'webview');
-  if (existsSync(src)) {
-    mkdirSync(dest, { recursive: true });
-    cpSync(src, dest, { recursive: true });
+  mkdirSync(dest, { recursive: true });
+
+  // 1. 复制 CSS 样式表
+  const cssSrc = join(src, 'panel.css');
+  const cssDest = join(dest, 'panel.css');
+  if (existsSync(cssSrc)) {
+    cpSync(cssSrc, cssDest);
   }
+
+  // 2. 复制 js 目录（保留各源码微模块副本供调试）
+  const jsSrcDir = join(src, 'js');
+  const jsDestDir = join(dest, 'js');
+  if (existsSync(jsSrcDir)) {
+    mkdirSync(jsDestDir, { recursive: true });
+    cpSync(jsSrcDir, jsDestDir, { recursive: true });
+  }
+
+  // 3. 聚合编译输出单个生产级 panel.js，保证确定性依赖顺序与零网络竞态
+  const orderedModules = [
+    'i18n.js',
+    'utils.js',
+    'state.js',
+    'render-cards.js',
+    'batch-manager.js',
+    'view-controller.js',
+    'main.js',
+  ];
+
+  let bundleContent = '/* Antigravity History Webview Client Bundle */\n';
+  for (const modName of orderedModules) {
+    const modPath = join(jsSrcDir, modName);
+    if (existsSync(modPath)) {
+      bundleContent += `\n/* ── Module: ${modName} ── */\n`;
+      bundleContent += readFileSync(modPath, 'utf-8') + '\n';
+    } else {
+      console.warn(`[bundleWebview] 警告: 未找到微模块 ${modName}`);
+    }
+  }
+
+  const bundleDest = join(dest, 'panel.js');
+  writeFileSync(bundleDest, bundleContent, 'utf-8');
+  console.log('[bundleWebview] 成功编译生成生产级单文件: dist/webview/panel.js');
 }
 
 /**

@@ -1,8 +1,19 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
 
 ## [0.3.5] - 2026-11-10
+
+### Fixed & Robustness
+- **Webview 多脚本时序竞态彻底修复与产物单文件化编译**：
+  - 源码保持 `src/webview/assets/js/` 目录下的清晰微模块拆分（`i18n`, `utils`, `state`, `render-cards`, `batch-manager`, `view-controller`, `main`）。
+  - 在 `esbuild.js` 构建流水线中引入聚合编译机制，按确定依赖拓扑顺序输出单一生产级脚本 `dist/webview/panel.js`，彻底消除 VS Code 虚拟协议跨进程读取多个外链脚本引发的未就绪竞态与选项卡切换受阻问题。
+  - 在 `html-provider.ts` 中恢复为单一 `<script nonce src="panel.js"></script>` 安全注入模式，加载性能提升数倍并强化 CSP 兼容性。
+- **前端启动初始化与全局异常兜底加固**：
+  - 主控制器 `main.js` 引入 `isInitialized` 防重入机制，移除脆弱的条件挂起，保证 DOM 就绪后立即完成初始化。
+  - 首屏无条件即刻调用 `showLoading()` 呈现旋转动画并主动向宿主请求数据，彻底消除黑屏等待感。
+  - 挂载全局 `window.onerror` 异常拦截器，发生未知异常时在界面友好呈现错误详情与重试按钮，杜绝静默失败。
+  - 方案计划选项卡切换 (`switchTab`) 增加数据主动补偿拉取机制，在数据尚未到达时自动请求 `refreshPlans`，确保无缝切换。
 
 ### Refactored & Code Reuse (DRY)
 - **双面板公共控制层深度解耦与通用视图控制器抽离**：

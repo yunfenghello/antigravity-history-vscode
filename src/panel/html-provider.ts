@@ -24,35 +24,19 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   const cssUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'panel.css'),
   );
-
-  // 模块化前端脚本资源 URI
-  const jsModules = [
-    'i18n.js',
-    'utils.js',
-    'state.js',
-    'render-cards.js',
-    'batch-manager.js',
-    'view-controller.js',
-    'main.js',
-  ].map((name) =>
-    webview.asWebviewUri(
-      vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'js', name),
-    ),
+  const jsUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'panel.js'),
   );
 
   const nonce = crypto.randomBytes(16).toString('hex');
   const currentLang = getCurrentLanguage();
-
-  const scriptTags = jsModules
-    .map((uri) => `<script nonce="${nonce}" src="${uri}"></script>`)
-    .join('\n  ');
 
   return `<!DOCTYPE html>
 <html lang="${currentLang}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
   <link rel="stylesheet" href="${cssUri}">
   <title>Antigravity History</title>
 </head>
@@ -110,7 +94,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   <div class="export-path-bar" id="export-path-bar"></div>
   <div id="list-container"></div>
   <div class="toast" id="toast"></div>
-  ${scriptTags}
+  <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;
 }

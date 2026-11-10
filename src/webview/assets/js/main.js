@@ -1,9 +1,10 @@
 // @ts-nocheck
 /**
- * 前端应用程序主控制器与事件委托中枢 (高度纯化与解耦)
+ * 前端应用程序主控制器与事件委托中枢 (生产级健壮加固)
  *
  * 核心功能：
  * - 初始化 VS Code 原生 API 通信桥接 (AG_VSCODE)
+ * - 挂载全局异常拦截器 (window.onerror)，杜绝界面静默白板
  * - 全局事件委托 (Event Delegation) 监听列表点击，消除数千个冗余监听器
  * - 全面委托通用视图控制器 (AG_ViewController) 调度刷新、展开/折叠、分组切换与搜索
  * - 纯化处理宿主双向 IPC 消息通信 (setConversations, setPlans, optimisticDelete 等)
@@ -12,50 +13,134 @@
  */
 
 (function (window) {
+  // 全局异常拦截与友好提示，杜绝界面出现静默白屏
+  window.onerror = function (msg, url, line, col, error) {
+    const listContainer = document.getElementById('list-container');
+    if (listContainer) {
+      listContainer.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon" style="color:var(--vscode-errorForeground)">!</div>
+          <div class="empty-state-title">界面脚本运行异常</div>
+          <div class="empty-state-desc" style="font-family:monospace;font-size:11px;text-align:left;background:rgba(255,0,0,0.08);padding:8px;border-radius:4px;overflow-x:auto;">
+            ${msg}<br>位置: ${line}:${col}
+          </div>
+          <button class="btn btn-primary" id="btn-err-retry" style="margin-top:12px;">重新加载</button>
+        </div>
+      `;
+      document.getElementById('btn-err-retry')?.addEventListener('click', () => {
+        window.location.reload();
+      });
+    }
+    return false;
+  };
+
   const vscode = acquireVsCodeApi();
   window.AG_VSCODE = vscode;
 
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
-  const { showToast, showError } = window.AG_Utils;
+  const { showToast, showLoading, showError } = window.AG_Utils;
   const state = window.AG_State;
 
+  function getVC() {
+    return window.AG_ViewController || {};
+  }
+
+  let isInitialized = false;
+
   /**
-   * 应用初始化总入口
+   * 应用初始化总入口 (防重入与容错加固)
    */
   function init() {
-    bindTopBarEvents();
-    bindGlobalDelegatedEvents();
-    bindIpcMessages();
-    window.AG_I18N.updateStaticTexts();
-    window.AG_ViewController.handleRefresh();
+    if (isInitialized) {
+      return;
+    }
+    isInitialized = true;
+
+    // 首屏无条件即刻展示加载中旋转态，消除等待感
+    showLoading();
+
+    try {
+      bindTopBarEvents();
+    } catch (e) {
+      console.error('[AG] 绑定顶栏事件失败:', e);
+    }
+
+    try {
+      bindGlobalDelegatedEvents();
+    } catch (e) {
+      console.error('[AG] 绑定全局委托事件失败:', e);
+    }
+
+    try {
+      bindIpcMessages();
+    } catch (e) {
+      console.error('[AG] 绑定IPC消息监听失败:', e);
+    }
+
+    try {
+      window.AG_I18N?.updateStaticTexts?.();
+    } catch (e) {
+      console.error('[AG] 更新多语言静态文本失败:', e);
+    }
+
+    // 触发统一流式刷新
+    try {
+      if (getVC().handleRefresh) {
+        getVC().handleRefresh();
+      } else {
+        vscode.postMessage({ command: 'refresh' });
+      }
+    } catch (e) {
+      console.error('[AG] 触发刷新失败:', e);
+      vscode.postMessage({ command: 'refresh' });
+    }
   }
 
   /**
    * 绑定顶栏所有按钮、输入框与下拉选择交互
    */
   function bindTopBarEvents() {
-    const vc = window.AG_ViewController;
+    // 选项卡切换 (动态调用控制器，杜绝局部变量闭包未就绪)
+    document.getElementById('tab-conversations')?.addEventListener('click', () => {
+      getVC().switchTab ? getVC().switchTab('conversations') : null;
+    });
 
-    // 选项卡切换
-    document.getElementById('tab-conversations')?.addEventListener('click', () => vc.switchTab('conversations'));
-    document.getElementById('tab-plans')?.addEventListener('click', () => vc.switchTab('plans'));
+    document.getElementById('tab-plans')?.addEventListener('click', () => {
+      getVC().switchTab ? getVC().switchTab('plans') : null;
+    });
 
     // 统一搜索输入防抖
-    document.getElementById('search-input')?.addEventListener('input', (e) => vc.handleSearchInput(e.target.value));
+    document.getElementById('search-input')?.addEventListener('input', (e) => {
+      getVC().handleSearchInput ? getVC().handleSearchInput(e.target.value) : null;
+    });
 
     // 统一分组模式切换 (日期 / 工作区)
-    document.getElementById('group-date')?.addEventListener('click', () => vc.setGroupBy('date'));
-    document.getElementById('group-workspace')?.addEventListener('click', () => vc.setGroupBy('workspace'));
+    document.getElementById('group-date')?.addEventListener('click', () => {
+      getVC().setGroupBy ? getVC().setGroupBy('date') : null;
+    });
+
+    document.getElementById('group-workspace')?.addEventListener('click', () => {
+      getVC().setGroupBy ? getVC().setGroupBy('workspace') : null;
+    });
 
     // 统一全部展开与全部折叠
-    document.getElementById('btn-expand-all')?.addEventListener('click', () => vc.expandAll());
-    document.getElementById('btn-collapse-all')?.addEventListener('click', () => vc.collapseAll());
+    document.getElementById('btn-expand-all')?.addEventListener('click', () => {
+      getVC().expandAll ? getVC().expandAll() : null;
+    });
+
+    document.getElementById('btn-collapse-all')?.addEventListener('click', () => {
+      getVC().collapseAll ? getVC().collapseAll() : null;
+    });
 
     // 统一刷新中枢触发
-    document.getElementById('btn-refresh')?.addEventListener('click', () => vc.handleRefresh());
+    document.getElementById('btn-refresh')?.addEventListener('click', () => {
+      getVC().handleRefresh ? getVC().handleRefresh() : vscode.postMessage({ command: 'refresh' });
+    });
 
     // 批量模式切换
-    document.getElementById('btn-toggle-batch')?.addEventListener('click', () => window.AG_Batch?.toggleBatchMode());
+    document.getElementById('btn-toggle-batch')?.addEventListener('click', () => {
+      window.AG_Batch?.toggleBatchMode?.();
+    });
 
     // 对话导出与配置项
     document.getElementById('btn-export-all')?.addEventListener('click', () => {
@@ -76,9 +161,9 @@
 
     document.getElementById('lang-select')?.addEventListener('change', (e) => {
       const lang = e.target.value;
-      window.AG_I18N.setLanguage(lang);
+      window.AG_I18N?.setLanguage?.(lang);
       vscode.postMessage({ command: 'setLanguage', value: lang });
-      vc.renderCurrentView();
+      getVC().renderCurrentView ? getVC().renderCurrentView() : null;
     });
 
     // 批量工具条动作按钮绑定
@@ -105,7 +190,7 @@
       const header = e.target.closest('.date-group-header');
       if (header) {
         const group = header.getAttribute('data-group');
-        window.AG_ViewController.toggleGroup(group);
+        getVC().toggleGroup ? getVC().toggleGroup(group) : null;
         return;
       }
 
@@ -136,7 +221,7 @@
 
     switch (action) {
       case 'refresh':
-        window.AG_ViewController.handleRefresh();
+        getVC().handleRefresh ? getVC().handleRefresh() : vscode.postMessage({ command: 'refresh' });
         break;
       case 'exportMd':
         vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
@@ -237,7 +322,7 @@
   function bindIpcMessages() {
     window.addEventListener('message', (event) => {
       const msg = event.data;
-      const vc = window.AG_ViewController;
+      if (!msg) return;
 
       switch (msg.command) {
         case 'setConversations': {
@@ -252,7 +337,7 @@
           }
           window.AG_Batch?.updateBatchBar();
           if (state.activeTab === 'conversations') {
-            vc.renderCurrentView();
+            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
           }
           break;
         }
@@ -265,7 +350,7 @@
           }
           window.AG_Batch?.updateBatchBar();
           if (state.activeTab === 'plans') {
-            vc.renderCurrentView();
+            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
           }
           break;
         }
@@ -290,8 +375,8 @@
         }
         case 'setLanguage': {
           if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
-            window.AG_I18N.setLanguage(msg.language);
-            vc.renderCurrentView();
+            window.AG_I18N?.setLanguage?.(msg.language);
+            getVC().renderCurrentView ? getVC().renderCurrentView() : null;
           }
           break;
         }
@@ -314,7 +399,7 @@
             }
             window.AG_Batch?.updateBatchBar();
             if (state.activeTab === 'conversations') {
-              vc.renderCurrentView();
+              getVC().renderCurrentView ? getVC().renderCurrentView() : null;
             }
           }
           break;
@@ -328,7 +413,7 @@
             }
             window.AG_Batch?.updateBatchBar();
             if (state.activeTab === 'plans') {
-              vc.renderCurrentView();
+              getVC().renderCurrentView ? getVC().renderCurrentView() : null;
             }
           }
           break;
@@ -369,8 +454,9 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', init);
-  if (document.readyState === 'interactive' || document.readyState === 'complete') {
-    init();
+  // 脚本处于文档底部，DOM 节点已完全解析，直接即刻初始化
+  init();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
   }
 })(window);
