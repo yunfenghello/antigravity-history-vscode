@@ -16,7 +16,7 @@
   window.AG_VSCODE = vscode;
 
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
-  const { esc, showToast, showLoading, showError } = window.AG_Utils;
+  const { showToast, showLoading, showError } = window.AG_Utils;
   const state = window.AG_State;
 
   function init() {
@@ -61,8 +61,12 @@
       searchInput.addEventListener('input', (e) => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          state.searchQuery = e.target.value;
-          window.AG_Renderer.renderList();
+          state.searchQuery = e.target.value.trim().toLowerCase();
+          if (state.activeTab === 'conversations') {
+            window.AG_Renderer.renderList();
+          } else {
+            window.AG_Renderer.renderPlansList();
+          }
         }, 120);
       });
     }
@@ -71,7 +75,9 @@
       groupDateBtn.addEventListener('click', () => {
         state.groupBy = 'date';
         groupDateBtn.classList.add('active');
-        groupWorkspaceBtn?.classList.remove('active');
+        if (groupWorkspaceBtn) {
+          groupWorkspaceBtn.classList.remove('active');
+        }
         window.AG_Renderer.renderList();
       });
     }
@@ -80,7 +86,9 @@
       groupWorkspaceBtn.addEventListener('click', () => {
         state.groupBy = 'workspace';
         groupWorkspaceBtn.classList.add('active');
-        groupDateBtn?.classList.remove('active');
+        if (groupDateBtn) {
+          groupDateBtn.classList.remove('active');
+        }
         window.AG_Renderer.renderList();
       });
     }
@@ -94,13 +102,17 @@
 
     if (collapseAllBtn) {
       collapseAllBtn.addEventListener('click', () => {
-        document.querySelectorAll('.group-header').forEach((el) => {
-          const k = el.getAttribute('data-group-key');
-          if (k) {
-            state.collapsedGroups.add(k);
-          }
-        });
-        window.AG_Renderer.renderList();
+        const listContainer = document.getElementById('list-container');
+        if (listContainer) {
+          const allHeaders = listContainer.querySelectorAll('.date-group-header');
+          allHeaders.forEach((h) => {
+            const group = h.getAttribute('data-group');
+            if (group) {
+              state.collapsedGroups.add(group);
+            }
+          });
+          window.AG_Renderer.renderList();
+        }
       });
     }
 
@@ -236,101 +248,132 @@
     }
 
     listContainer.addEventListener('click', (e) => {
-      // 1. 分组折叠展开点击
-      const groupHeader = e.target.closest('.group-header');
-      if (groupHeader) {
-        const groupKey = groupHeader.getAttribute('data-group-key');
-        if (groupKey) {
-          if (state.collapsedGroups.has(groupKey)) {
-            state.collapsedGroups.delete(groupKey);
+      // 1. 处理分组展开/折叠
+      const header = e.target.closest('.date-group-header');
+      if (header) {
+        const group = header.getAttribute('data-group');
+        if (group) {
+          if (state.collapsedGroups.has(group)) {
+            state.collapsedGroups.delete(group);
           } else {
-            state.collapsedGroups.add(groupKey);
+            state.collapsedGroups.add(group);
           }
           window.AG_Renderer.renderList();
         }
         return;
       }
 
-      // 2. 复选框点击
-      if (e.target.classList.contains('card-checkbox')) {
-        const id = e.target.getAttribute('data-checkbox-id');
-        const isPlan = state.activeTab === 'plans';
-        const targetSet = isPlan ? state.selectedPlanIds : state.selectedConvIds;
-        if (e.target.checked) {
-          targetSet.add(id);
-        } else {
-          targetSet.delete(id);
-        }
-        const card = e.target.closest('.card');
-        if (card) {
-          card.classList.toggle('selected', e.target.checked);
-        }
-        window.AG_Batch.updateBatchBar();
-        return;
-      }
+      // 2. 处理动作按钮点击
+      const actionBtn = e.target.closest('[data-action]');
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.getAttribute('data-action');
+        const cascadeId = actionBtn.getAttribute('data-id');
+        const planId = actionBtn.getAttribute('data-plan-id');
 
-      // 3. 按钮动作派发
-      const actionEl = e.target.closest('[data-action]');
-      if (!actionEl) {
-        return;
-      }
-      const action = actionEl.getAttribute('data-action');
-      const card = actionEl.closest('.card');
-
-      if (action === 'export-md') {
-        const cid = card?.getAttribute('data-cascade-id');
-        if (cid) {
+        if (action === 'refresh') {
+          showLoading();
+          vscode.postMessage({ command: 'refresh' });
+          vscode.postMessage({ command: 'refreshPlans' });
+        } else if (action === 'exportMd') {
+          vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
           showToast(t('preparingExportMd'));
-          vscode.postMessage({ command: 'export', cascadeId: cid, format: 'md' });
-        }
-      } else if (action === 'export-json') {
-        const cid = card?.getAttribute('data-cascade-id');
-        if (cid) {
+        } else if (action === 'exportJson') {
+          vscode.postMessage({ command: 'export', cascadeId, format: 'json' });
           showToast(t('preparingExportJson'));
-          vscode.postMessage({ command: 'export', cascadeId: cid, format: 'json' });
-        }
-      } else if (action === 'delete-conv') {
-        const cid = card?.getAttribute('data-cascade-id');
-        if (cid) {
-          vscode.postMessage({ command: 'deleteConversation', cascadeId: cid });
-        }
-      } else if (action === 'delete-plan') {
-        const pid = actionEl.getAttribute('data-plan-id');
-        if (pid) {
-          vscode.postMessage({ command: 'deletePlan', planId: pid });
-        }
-      } else if (action === 'export-plan-single') {
-        const pid = actionEl.getAttribute('data-plan-id');
-        const fileName = actionEl.getAttribute('data-file-name');
-        if (pid) {
-          vscode.postMessage({ command: 'exportPlanSingle', planId: pid, fileName });
-        }
-      } else if (action === 'export-plan-all') {
-        const pid = actionEl.getAttribute('data-plan-id');
-        if (pid) {
-          vscode.postMessage({ command: 'exportPlanAll', planId: pid });
-        }
-      } else if (action === 'copy-id') {
-        const cid = card?.getAttribute('data-cascade-id') || actionEl.getAttribute('data-cid');
-        if (cid) {
-          vscode.postMessage({ command: 'copyId', cascadeId: cid });
+        } else if (action === 'copyId') {
+          vscode.postMessage({ command: 'copyId', cascadeId: cascadeId || planId });
           showToast(t('idCopied'));
+        } else if (action === 'openFolder') {
+          const folderPath = actionBtn.getAttribute('data-path');
+          if (folderPath) {
+            vscode.postMessage({ command: 'openInExplorer', path: folderPath });
+          }
+        } else if (action === 'exportPlanSingle') {
+          const fileName = actionBtn.getAttribute('data-file-name') || 'implementation_plan.md';
+          vscode.postMessage({ command: 'exportPlanSingle', planId, fileName });
+        } else if (action === 'exportPlanAll') {
+          vscode.postMessage({ command: 'exportPlanAll', planId });
+        } else if (action === 'openPlanFolder') {
+          const folderPath = actionBtn.getAttribute('data-path');
+          if (folderPath) {
+            vscode.postMessage({ command: 'openInExplorer', path: folderPath });
+          }
+        } else if (action === 'deleteConv') {
+          if (cascadeId) {
+            vscode.postMessage({ command: 'deleteConversation', cascadeId });
+          }
+        } else if (action === 'deletePlan') {
+          if (planId) {
+            vscode.postMessage({ command: 'deletePlan', planId });
+          }
         }
-      } else if (action === 'open-folder') {
-        const p = actionEl.getAttribute('data-path');
-        if (p) {
-          vscode.postMessage({ command: 'openInExplorer', path: p });
-        }
-      } else if (action === 'open-plan-folder') {
-        const p = actionEl.getAttribute('data-path');
-        if (p) {
-          vscode.postMessage({ command: 'openPlanFolder', path: p });
-        }
-      } else if (action === 'open-conv-dir') {
-        const cid = actionEl.getAttribute('data-cid');
-        if (state.convDataDir) {
-          const fullPath = cid ? `${state.convDataDir}/${cid}` : state.convDataDir;
-          vscode.postMessage({ command: 'openInExplorer', path: fullPath });
+        return;
+      }
+
+      // 3. 处理批量模式下的卡片勾选或整行点击切换
+      if (state.isBatchMode) {
+        const card = e.target.closest('.conv-card');
+        if (card) {
+          const checkbox = e.target.closest('.conv-checkbox');
+          const cid = card.getAttribute('data-cascade-id');
+          const pid = card.getAttribute('data-plan-id');
+
+          if (state.activeTab === 'conversations' && cid) {
+            if (checkbox) {
+              if (checkbox.checked) {
+                state.selectedConvIds.add(cid);
+                card.classList.add('selected');
+              } else {
+                state.selectedConvIds.delete(cid);
+                card.classList.remove('selected');
+              }
+            } else {
+              const cb = card.querySelector('.conv-checkbox');
+              if (state.selectedConvIds.has(cid)) {
+                state.selectedConvIds.delete(cid);
+                card.classList.remove('selected');
+                if (cb) {
+                  cb.checked = false;
+                }
+              } else {
+                state.selectedConvIds.add(cid);
+                card.classList.add('selected');
+                if (cb) {
+                  cb.checked = true;
+                }
+              }
+            }
+            window.AG_Batch.updateBatchBar();
+            return;
+          } else if (state.activeTab === 'plans' && pid) {
+            if (checkbox) {
+              if (checkbox.checked) {
+                state.selectedPlanIds.add(pid);
+                card.classList.add('selected');
+              } else {
+                state.selectedPlanIds.delete(pid);
+                card.classList.remove('selected');
+              }
+            } else {
+              const cb = card.querySelector('.conv-checkbox');
+              if (state.selectedPlanIds.has(pid)) {
+                state.selectedPlanIds.delete(pid);
+                card.classList.remove('selected');
+                if (cb) {
+                  cb.checked = false;
+                }
+              } else {
+                state.selectedPlanIds.add(pid);
+                card.classList.add('selected');
+                if (cb) {
+                  cb.checked = true;
+                }
+              }
+            }
+            window.AG_Batch.updateBatchBar();
+            return;
+          }
         }
       }
     });
@@ -345,6 +388,12 @@
           if (msg.convDir) {
             state.convDataDir = msg.convDir;
           }
+          for (const cid of Array.from(state.selectedConvIds)) {
+            if (!state.conversations[cid]) {
+              state.selectedConvIds.delete(cid);
+            }
+          }
+          window.AG_Batch.updateBatchBar();
           if (state.activeTab === 'conversations') {
             window.AG_Renderer.renderList();
           }
@@ -352,6 +401,12 @@
         }
         case 'setPlans': {
           state.plans = msg.plans || [];
+          for (const pid of Array.from(state.selectedPlanIds)) {
+            if (!state.plans.some((p) => p.id === pid)) {
+              state.selectedPlanIds.delete(pid);
+            }
+          }
+          window.AG_Batch.updateBatchBar();
           if (state.activeTab === 'plans') {
             window.AG_Renderer.renderPlansList();
           }
@@ -377,9 +432,13 @@
           break;
         }
         case 'setLanguage': {
-          if (msg.language) {
+          if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
             window.AG_I18N.setLanguage(msg.language);
-            window.AG_Renderer.renderList();
+            if (state.activeTab === 'conversations') {
+              window.AG_Renderer.renderList();
+            } else {
+              window.AG_Renderer.renderPlansList();
+            }
           }
           break;
         }
@@ -396,11 +455,11 @@
         }
         case 'optimisticDeleteConvs': {
           if (Array.isArray(msg.cascadeIds)) {
-            const deleteSet = new Set(msg.cascadeIds);
             for (const cid of msg.cascadeIds) {
               delete state.conversations[cid];
               state.selectedConvIds.delete(cid);
             }
+            window.AG_Batch.updateBatchBar();
             if (state.activeTab === 'conversations') {
               window.AG_Renderer.renderList();
             }
@@ -414,6 +473,7 @@
             for (const pid of msg.planIds) {
               state.selectedPlanIds.delete(pid);
             }
+            window.AG_Batch.updateBatchBar();
             if (state.activeTab === 'plans') {
               window.AG_Renderer.renderPlansList();
             }
@@ -461,4 +521,3 @@
     init();
   }
 })(window);
-

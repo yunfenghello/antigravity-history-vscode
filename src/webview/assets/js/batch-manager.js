@@ -5,7 +5,7 @@
  * 核心功能：
  * - 批量模式开启、退出与视觉切换
  * - 动态计数统计呈现 (已选择 N 项)
- * - 全选、反选、取消全选集合计算与高亮边框同步
+ * - 全选、反选、取消全选集合计算与卡片高亮联动
  * - 批量物理删除 IPC 调度
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
@@ -74,36 +74,54 @@
   }
 
   function getVisibleItemIds() {
-    const listContainer = document.getElementById('list-container');
-    if (!listContainer) {
-      return [];
+    const state = window.AG_State;
+    const query = (state.searchQuery || '').toLowerCase().trim();
+
+    if (state.activeTab === 'conversations') {
+      const entries = Object.entries(state.conversations || {});
+      const filtered = entries.filter(([cid, info]) => {
+        if (!query) {
+          return true;
+        }
+        const title = (info.summary || '').toLowerCase();
+        const id = cid.toLowerCase();
+        const ws = (info.workspaces || [])
+          .map((w) => (w.workspaceFolderAbsoluteUri || '').toLowerCase())
+          .join(' ');
+        return title.includes(query) || id.includes(query) || ws.includes(query);
+      });
+      return filtered.map(([cid]) => cid);
+    } else {
+      const filtered = (state.plans || []).filter((plan) => {
+        if (!query) {
+          return true;
+        }
+        const title = (plan.title || '').toLowerCase();
+        const ws = (plan.workspacePath || '').toLowerCase();
+        const id = (plan.id || '').toLowerCase();
+        return title.includes(query) || ws.includes(query) || id.includes(query);
+      });
+      return filtered.map((p) => p.id);
     }
-    const checkboxes = listContainer.querySelectorAll('.card-checkbox');
-    const ids = [];
-    checkboxes.forEach((cb) => {
-      const id = cb.getAttribute('data-checkbox-id');
-      if (id) {
-        ids.push(id);
-      }
-    });
-    return ids;
   }
 
   function handleSelectAll() {
     const state = window.AG_State;
-    const visibleIds = getVisibleItemIds();
+    const ids = getVisibleItemIds();
     const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
-    visibleIds.forEach((id) => targetSet.add(id));
+    ids.forEach((id) => targetSet.add(id));
 
-    syncCardSelections();
+    if (window.AG_Renderer) {
+      window.AG_Renderer.renderList();
+    }
     updateBatchBar();
   }
 
   function handleInvertSelect() {
     const state = window.AG_State;
-    const visibleIds = getVisibleItemIds();
+    const ids = getVisibleItemIds();
     const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
-    visibleIds.forEach((id) => {
+    ids.forEach((id) => {
       if (targetSet.has(id)) {
         targetSet.delete(id);
       } else {
@@ -111,7 +129,9 @@
       }
     });
 
-    syncCardSelections();
+    if (window.AG_Renderer) {
+      window.AG_Renderer.renderList();
+    }
     updateBatchBar();
   }
 
@@ -120,32 +140,10 @@
     const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
     targetSet.clear();
 
-    syncCardSelections();
-    updateBatchBar();
-  }
-
-  function syncCardSelections() {
-    const state = window.AG_State;
-    const listContainer = document.getElementById('list-container');
-    if (!listContainer) {
-      return;
+    if (window.AG_Renderer) {
+      window.AG_Renderer.renderList();
     }
-    const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
-    const cards = listContainer.querySelectorAll('.card');
-
-    cards.forEach((card) => {
-      const id = card.getAttribute('data-cascade-id') || card.getAttribute('data-plan-id');
-      const isSelected = targetSet.has(id);
-      const cb = card.querySelector('.card-checkbox');
-      if (cb) {
-        cb.checked = isSelected;
-      }
-      if (isSelected) {
-        card.classList.add('selected');
-      } else {
-        card.classList.remove('selected');
-      }
-    });
+    updateBatchBar();
   }
 
   function handleBatchDelete() {
@@ -179,8 +177,6 @@
     handleSelectAll,
     handleInvertSelect,
     handleDeselectAll,
-    syncCardSelections,
     handleBatchDelete,
   };
 })(window);
-

@@ -3,17 +3,17 @@
  * 前端视图卡片与列表渲染引擎
  *
  * 核心功能：
- * - 渲染【对话历史】会话卡片（日期/工作区分组、复选框多选状态联动）
- * - 渲染【方案计划】工件卡片（各工件单独另存为、全部工件导出与源目录打开）
- * - 智能折叠分组与按需惰性渲染，降低 DOM 节点数与计算开销
- * - 状态圆点、空状态提示与检索高亮呈现
+ * - 渲染【对话历史】会话卡片（严格对齐 panel.css 样式类名）
+ * - 渲染【方案计划】工件卡片（支持单件下载、全部导出、源目录定位与删除）
+ * - 日期与工作区分组智能折叠与按需渲染
+ * - 批量模式复选框动态注入与选中边框高亮联动
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 (function (window) {
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
-  const { esc, stripFileUri, toWinPath, dateKey, formatTime } = window.AG_Utils;
+  const { esc, stripFileUri, toWinPath, formatTime } = window.AG_Utils;
 
   function renderList() {
     const listContainer = document.getElementById('list-container');
@@ -30,7 +30,7 @@
 
     renderExportPathBar();
 
-    const entries = Object.entries(state.conversations);
+    const entries = Object.entries(state.conversations || {});
     if (entries.length === 0) {
       listContainer.innerHTML = getEmptyStateHtml();
       if (statsBar) {
@@ -39,9 +39,9 @@
       return;
     }
 
-    // 过滤检索
+    // 搜索过滤
     let filtered = entries;
-    const query = state.searchQuery.toLowerCase().trim();
+    const query = (state.searchQuery || '').toLowerCase().trim();
     if (query) {
       filtered = entries.filter(([id, info]) => {
         const sum = (info.summary || '').toLowerCase();
@@ -52,7 +52,7 @@
       });
     }
 
-    // 状态统计信息
+    // 统计条文案
     if (statsBar) {
       if (filtered.length !== entries.length) {
         statsBar.textContent = t('totalConversations', filtered.length, entries.length);
@@ -76,27 +76,28 @@
     const listContainer = document.getElementById('list-container');
     const state = window.AG_State;
     const groups = state.groupBy === 'workspace' ? groupByWorkspace(entries) : groupByDate(entries);
-
     let html = '';
-    for (const group of groups) {
-      const isCollapsed = state.collapsedGroups.has(group.key);
-      const count = group.items.length;
 
+    for (const [groupLabel, items] of groups) {
+      const isCollapsed = state.collapsedGroups.has(groupLabel);
+      const arrow = isCollapsed ? '&#x25B6;' : '&#x25BC;';
+
+      html += `<div class="date-group" data-group="${esc(groupLabel)}">`;
       html += `
-        <div class="group-header ${isCollapsed ? 'collapsed' : ''}" data-group-key="${esc(group.key)}">
-          <span class="group-arrow">&#x25BC;</span>
-          <span class="group-title">${esc(group.label)}</span>
-          <span class="group-count">(${count})</span>
+        <div class="date-group-header" data-group="${esc(groupLabel)}">
+          <span class="group-arrow">${arrow}</span>
+          <span class="date-group-label">${esc(groupLabel)}</span>
+          <span class="date-group-count">(${items.length})</span>
         </div>
       `;
 
+      html += `<div class="group-items ${isCollapsed ? 'collapsed' : ''}">`;
       if (!isCollapsed) {
-        html += '<div class="group-items">';
-        for (const [id, info] of group.items) {
-          html += renderCard(id, info);
+        for (const [cid, info] of items) {
+          html += renderCard(cid, info);
         }
-        html += '</div>';
       }
+      html += `</div></div>`;
     }
 
     listContainer.innerHTML = html;
@@ -104,61 +105,47 @@
 
   function renderCard(cascadeId, info) {
     const state = window.AG_State;
-    const rawTitle = info.summary || t('unnamedConv');
-    const title = esc(rawTitle);
-    const steps = info.stepCount !== undefined ? info.stepCount : '?';
-    const status = info.status || 'unknown';
+    const title = info.summary || t('unnamedConv');
+    const stepCount = info.stepCount !== undefined ? info.stepCount : '?';
+    const time = formatTime(info.lastModifiedTime || info.createdTime);
+    const status = info.status || '';
     const statusDot = getStatusDot(status);
-
-    const timeStr = info.lastModifiedTime || info.lastUserInputTime || info.createdTime;
-    const timeFormatted = timeStr ? formatTime(timeStr) : '';
-
-    let workspaceName = '';
-    let workspaceFullPath = '';
-    if (info.workspaces && info.workspaces.length > 0) {
-      const rawUri = info.workspaces[0].workspaceFolderAbsoluteUri || '';
-      workspaceFullPath = stripFileUri(rawUri);
-      workspaceName = workspaceFullPath.split(/[\\\/]/).filter(Boolean).pop() || '';
-    }
-
     const isSelected = state.selectedConvIds.has(cascadeId);
-    const cardSelectedClass = isSelected ? 'selected' : '';
-    const checkboxCheckedAttr = isSelected ? 'checked' : '';
+
+    const workspaces = (info.workspaces || [])
+      .map((w) => w.workspaceFolderAbsoluteUri)
+      .filter(Boolean);
+    const wsPath = workspaces.length > 0 ? workspaces[0] : '';
+    const wsDisplay = toWinPath(stripFileUri(wsPath));
+    const wsTooltip = t('openFolderTooltip', wsDisplay);
+    const wsHtml = wsPath
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(wsPath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
+      : '';
+
+    const convDataTooltip = t('openConvDataTooltip', state.convDataDir ? toWinPath(state.convDataDir) : '');
+    const convFileHtml = state.convDataDir
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(state.convDataDir)}" title="${esc(convDataTooltip)}"><span class="tag-label">[存储]</span> ${esc(cascadeId)}</div>`
+      : '';
+
+    const checkboxHtml = state.isBatchMode
+      ? `<div class="conv-checkbox-wrapper"><input type="checkbox" class="conv-checkbox" data-checkbox-id="${esc(cascadeId)}" ${isSelected ? 'checked' : ''}></div>`
+      : '';
 
     return `
-      <div class="card ${cardSelectedClass}" data-cascade-id="${esc(cascadeId)}" data-title="${esc(rawTitle)}">
-        <div class="card-selection ${state.isBatchMode ? 'visible' : ''}">
-          <input type="checkbox" class="card-checkbox" data-checkbox-id="${esc(cascadeId)}" ${checkboxCheckedAttr}>
+      <div class="conv-card ${state.isBatchMode ? 'batch-selectable' : ''} ${isSelected ? 'selected' : ''}" data-cascade-id="${esc(cascadeId)}">
+        ${checkboxHtml}
+        <div class="conv-icon">${statusDot}</div>
+        <div class="conv-info">
+          <div class="conv-title" title="${esc(title)}">${esc(title)}</div>
+          <div class="conv-meta">${time} · ${stepCount} ${t('stepsUnit')}</div>
+          ${wsHtml}
+          ${convFileHtml}
         </div>
-        <div class="card-main">
-          <div class="card-header">
-            ${statusDot}
-            <span class="card-title" title="${title}">${title}</span>
-            <span class="card-steps">${steps} ${t('stepsUnit')}</span>
-            ${timeFormatted ? `<span class="card-time">${timeFormatted}</span>` : ''}
-          </div>
-          <div class="card-meta">
-            <span class="card-id" title="${t('copyIdTooltip')}" data-action="copy-id">${esc(cascadeId.slice(0, 8))}...</span>
-            ${
-              workspaceName
-                ? `<span class="card-workspace clickable" data-action="open-folder" data-path="${esc(workspaceFullPath)}" title="${t('openFolderTooltip', workspaceFullPath)}">
-                    ${esc(workspaceName)}
-                  </span>`
-                : `<span class="card-workspace card-workspace-none">${t('noWorkspace')}</span>`
-            }
-            ${
-              state.convDataDir
-                ? `<span class="card-storage-link clickable" data-action="open-conv-dir" data-cid="${esc(cascadeId)}" title="${t('openConvDataTooltip', state.convDataDir)}">
-                    &#x1F4C1; ${t('openPath')}
-                  </span>`
-                : ''
-            }
-          </div>
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-icon-sm" data-action="export-md" title="${t('exportMdTooltip')}">MD</button>
-          <button class="btn btn-icon-sm" data-action="export-json" title="${t('exportJsonTooltip')}">JSON</button>
-          <button class="btn btn-icon-sm btn-danger" data-action="delete-conv" title="${t('deleteConvTooltip')}">${t('deleteBtn')}</button>
+        <div class="conv-actions">
+          <button class="btn-export" data-action="exportMd" data-id="${esc(cascadeId)}" title="${esc(t('exportMdTooltip'))}">MD</button>
+          <button class="btn-export" data-action="exportJson" data-id="${esc(cascadeId)}" title="${esc(t('exportJsonTooltip'))}">JSON</button>
+          <button class="btn-export" data-action="copyId" data-id="${esc(cascadeId)}" title="${esc(t('copyIdTooltip'))}">ID</button>
+          <button class="btn-export btn-danger-action" data-action="deleteConv" data-id="${esc(cascadeId)}" title="${esc(t('deleteConvTooltip'))}">${esc(t('deleteBtn'))}</button>
         </div>
       </div>
     `;
@@ -181,7 +168,7 @@
     }
 
     let filtered = plans;
-    const query = state.searchQuery.toLowerCase().trim();
+    const query = (state.searchQuery || '').toLowerCase().trim();
     if (query) {
       filtered = plans.filter((p) => {
         const title = (p.title || '').toLowerCase();
@@ -218,77 +205,44 @@
 
   function renderPlanCard(plan) {
     const state = window.AG_State;
-    const rawTitle = plan.title || t('unnamedPlan');
-    const title = esc(rawTitle);
-    const artifactsCount = plan.artifacts ? plan.artifacts.length : 0;
-    const timeFormatted = plan.lastModifiedTime ? formatTime(plan.lastModifiedTime) : '';
-
-    let workspaceName = '';
-    let workspaceFullPath = '';
-    if (plan.workspacePath) {
-      workspaceFullPath = plan.workspacePath;
-      workspaceName = workspaceFullPath.split(/[\\\/]/).filter(Boolean).pop() || '';
-    }
-
-    let artifactPillsHtml = '';
-    if (plan.artifacts && plan.artifacts.length > 0) {
-      artifactPillsHtml = '<div class="plan-artifact-pills">';
-      for (const a of plan.artifacts) {
-        const sizeKb = Math.round(a.size / 1024);
-        artifactPillsHtml += `
-          <button class="artifact-pill" data-action="export-plan-single" data-plan-id="${esc(plan.id)}" data-file-name="${esc(a.fileName)}" title="${t('saveArtifactTooltip', a.label, sizeKb + 'KB')}">
-            ${esc(a.label)} <span class="pill-size">${sizeKb}KB</span>
-          </button>
-        `;
-      }
-      artifactPillsHtml += '</div>';
-    }
-
+    const title = plan.title || t('unnamedPlan');
+    const time = formatTime(plan.lastModifiedTime);
+    const wsDisplay = plan.workspacePath ? toWinPath(plan.workspacePath) : t('noWorkspace');
+    const wsTooltip = t('openFolderTooltip', wsDisplay);
     const isSelected = state.selectedPlanIds.has(plan.id);
-    const cardSelectedClass = isSelected ? 'selected' : '';
-    const checkboxCheckedAttr = isSelected ? 'checked' : '';
+
+    const wsHtml = plan.workspacePath
+      ? `<div class="conv-workspace" data-action="openFolder" data-path="${esc(plan.workspacePath)}" title="${esc(wsTooltip)}"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`
+      : `<div class="conv-workspace" style="color:var(--vscode-descriptionForeground)"><span class="tag-label">[工作区]</span> ${esc(wsDisplay)}</div>`;
+
+    // 渲染工件徽章
+    let badgesHtml = '<div class="artifact-badge-group">';
+    for (const art of plan.artifacts || []) {
+      const isMain = art.fileName === 'implementation_plan.md';
+      const tooltip = t('saveArtifactTooltip', art.label, art.fileName);
+      badgesHtml += `<button class="artifact-badge ${isMain ? 'primary' : ''}" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="${esc(art.fileName)}" title="${esc(tooltip)}"><span class="badge-icon">&#x2193;</span> ${esc(art.label)} (${esc(art.fileName)})</button>`;
+    }
+    badgesHtml += '</div>';
+
+    const checkboxHtml = state.isBatchMode
+      ? `<div class="conv-checkbox-wrapper"><input type="checkbox" class="conv-checkbox" data-checkbox-plan-id="${esc(plan.id)}" ${isSelected ? 'checked' : ''}></div>`
+      : '';
 
     return `
-      <div class="card plan-card ${cardSelectedClass}" data-plan-id="${esc(plan.id)}" data-title="${esc(rawTitle)}">
-        <div class="card-selection ${state.isBatchMode ? 'visible' : ''}">
-          <input type="checkbox" class="card-checkbox" data-checkbox-id="${esc(plan.id)}" ${checkboxCheckedAttr}>
+      <div class="conv-card plan-card ${state.isBatchMode ? 'batch-selectable' : ''} ${isSelected ? 'selected' : ''}" data-plan-id="${esc(plan.id)}">
+        ${checkboxHtml}
+        <div class="conv-icon"><span class="status-dot active">&#x25CF;</span></div>
+        <div class="conv-info">
+          <div class="conv-title" style="font-weight:600;font-size:14px;" title="${esc(title)}">${esc(title)}</div>
+          <div class="conv-meta">${time} · ID: ${esc(plan.id.slice(0, 8))}...</div>
+          ${wsHtml}
+          ${badgesHtml}
         </div>
-        <div class="card-main">
-          <div class="card-header">
-            <span class="status-dot dot-active"></span>
-            <span class="card-title" title="${title}">${title}</span>
-            <span class="card-steps">${artifactsCount} 份工件</span>
-            ${timeFormatted ? `<span class="card-time">${timeFormatted}</span>` : ''}
-          </div>
-          <div class="card-meta">
-            <span class="card-id" title="${t('copyIdTooltip')}" data-action="copy-id" data-cid="${esc(plan.id)}">${esc(plan.id.slice(0, 8))}...</span>
-            ${
-              workspaceName
-                ? `<span class="card-workspace clickable" data-action="open-folder" data-path="${esc(workspaceFullPath)}" title="${t('openFolderTooltip', workspaceFullPath)}">
-                    ${esc(workspaceName)}
-                  </span>`
-                : `<span class="card-workspace card-workspace-none">${t('noWorkspace')}</span>`
-            }
-            ${
-              plan.dirPath
-                ? `<span class="card-storage-link clickable" data-action="open-plan-folder" data-path="${esc(plan.dirPath)}" title="${t('openPlanSourceTooltip')}">
-                    &#x1F4C2; ${t('openSourceFolderBtn')}
-                  </span>`
-                : ''
-            }
-          </div>
-          ${artifactPillsHtml}
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-secondary btn-sm" data-action="export-plan-single" data-plan-id="${esc(plan.id)}" title="${t('savePlanTooltip')}">
-            ${t('savePlanBtn')}
-          </button>
-          <button class="btn btn-secondary btn-sm" data-action="export-plan-all" data-plan-id="${esc(plan.id)}" title="${t('saveAllArtifactsTooltip')}">
-            ${t('saveAllArtifactsBtn')}
-          </button>
-          <button class="btn btn-icon-sm btn-danger" data-action="delete-plan" data-plan-id="${esc(plan.id)}" title="${t('deletePlanTooltip')}">
-            ${t('deleteBtn')}
-          </button>
+        <div class="conv-actions">
+          <button class="btn btn-primary btn-sm" data-action="exportPlanSingle" data-plan-id="${esc(plan.id)}" data-file-name="implementation_plan.md" title="${esc(t('savePlanTooltip'))}">${esc(t('savePlanBtn'))}</button>
+          <button class="btn btn-secondary btn-sm" data-action="exportPlanAll" data-plan-id="${esc(plan.id)}" title="${esc(t('saveAllArtifactsTooltip'))}">${esc(t('saveAllArtifactsBtn'))}</button>
+          <button class="btn-export" data-action="openPlanFolder" data-path="${esc(plan.dirPath)}" title="${esc(t('openPlanSourceTooltip'))}">${esc(t('openSourceFolderBtn'))}</button>
+          <button class="btn-export btn-danger-action" data-action="deletePlan" data-plan-id="${esc(plan.id)}" title="${esc(t('deletePlanTooltip'))}">${esc(t('deletePlanBtn'))}</button>
         </div>
       </div>
     `;
@@ -333,69 +287,95 @@
   }
 
   function getStatusDot(status) {
-    const s = (status || '').toLowerCase();
-    if (s.includes('active') || s.includes('running')) {
-      return '<span class="status-dot dot-active"></span>';
+    if (status === 'STATUS_ACTIVE' || status === 'active' || status === 'CASCADE_RUN_STATUS_RUNNING') {
+      return '<span class="status-dot active">&#x25CF;</span>';
     }
-    if (s.includes('error') || s.includes('fail')) {
-      return '<span class="status-dot dot-error"></span>';
+    if (status === 'STATUS_COMPLETED' || status === 'completed') {
+      return '<span class="status-dot completed">&#x25CF;</span>';
     }
-    return '<span class="status-dot dot-completed"></span>';
+    return '<span class="status-dot idle">&#x25CF;</span>';
+  }
+
+  function dateKey(d) {
+    if (!d || isNaN(d.getTime())) {
+      return 'earlier';
+    }
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
 
   function groupByDate(entries) {
-    const groups = { today: [], yesterday: [], earlier: [] };
+    const now = new Date();
+    const todayStr = dateKey(now);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = dateKey(yesterday);
+    const groups = new Map();
+
+    entries.sort((a, b) => {
+      const ta = a[1].lastModifiedTime || a[1].createdTime || '';
+      const tb = b[1].lastModifiedTime || b[1].createdTime || '';
+      return tb.localeCompare(ta);
+    });
+
     for (const entry of entries) {
-      const info = entry[1];
-      const timeStr = info.lastModifiedTime || info.lastUserInputTime || info.createdTime;
-      const d = timeStr ? new Date(timeStr) : null;
-      const k = dateKey(d);
-      groups[k].push(entry);
+      const ts = entry[1].lastModifiedTime || entry[1].createdTime;
+      let label = t('timeEarlier');
+      if (ts) {
+        try {
+          const d = new Date(ts);
+          const dk = dateKey(d);
+          if (dk === todayStr) {
+            label = t('timeToday');
+          } else if (dk === yesterdayStr) {
+            label = t('timeYesterday');
+          } else {
+            label = dk;
+          }
+        } catch {
+          label = t('timeEarlier');
+        }
+      }
+      if (!groups.has(label)) {
+        groups.set(label, []);
+      }
+      groups.get(label).push(entry);
     }
-    const result = [];
-    if (groups.today.length > 0) {
-      result.push({ key: 'today', label: t('timeToday'), items: groups.today });
-    }
-    if (groups.yesterday.length > 0) {
-      result.push({ key: 'yesterday', label: t('timeYesterday'), items: groups.yesterday });
-    }
-    if (groups.earlier.length > 0) {
-      result.push({ key: 'earlier', label: t('timeEarlier'), items: groups.earlier });
-    }
-    return result;
+    return groups;
   }
 
   function groupByWorkspace(entries) {
-    const map = new Map();
+    const groups = new Map();
+    entries.sort((a, b) => {
+      const ta = a[1].lastModifiedTime || a[1].createdTime || '';
+      const tb = b[1].lastModifiedTime || b[1].createdTime || '';
+      return tb.localeCompare(ta);
+    });
+
     for (const entry of entries) {
       const info = entry[1];
-      let wsName = t('noWorkspace');
-      if (info.workspaces && info.workspaces.length > 0) {
-        const rawUri = info.workspaces[0].workspaceFolderAbsoluteUri || '';
-        const clean = stripFileUri(rawUri);
-        const name = clean.split(/[\\\/]/).filter(Boolean).pop();
-        if (name) {
-          wsName = name;
-        }
+      const workspaces = (info.workspaces || [])
+        .map((w) => w.workspaceFolderAbsoluteUri)
+        .filter(Boolean);
+      const wsPath = workspaces.length > 0 ? workspaces[0] : '';
+      const wsDisplay = wsPath ? toWinPath(stripFileUri(wsPath)) : t('noWorkspace');
+
+      if (!groups.has(wsDisplay)) {
+        groups.set(wsDisplay, []);
       }
-      if (!map.has(wsName)) {
-        map.set(wsName, []);
-      }
-      map.get(wsName).push(entry);
+      groups.get(wsDisplay).push(entry);
     }
-    return Array.from(map.entries()).map(([name, items]) => ({
-      key: `ws_${name}`,
-      label: name,
-      items,
-    }));
+    return groups;
   }
 
   function getEmptyStateHtml() {
     return `
       <div class="empty-state">
-        <div class="empty-icon">&#x1F4AC;</div>
-        <div class="empty-title">${t('emptyTitle')}</div>
-        <div class="empty-desc">${t('emptyDesc')}</div>
+        <div class="empty-state-icon">&#x1F4AC;</div>
+        <div class="empty-state-title">${t('emptyTitle')}</div>
+        <div class="empty-state-desc">${t('emptyDesc')}</div>
       </div>
     `;
   }
@@ -403,9 +383,9 @@
   function getEmptyPlansStateHtml() {
     return `
       <div class="empty-state">
-        <div class="empty-icon">&#x1F4DD;</div>
-        <div class="empty-title">${t('emptyPlanTitle')}</div>
-        <div class="empty-desc">${t('emptyPlanDesc')}</div>
+        <div class="empty-state-icon">&#x1F4DD;</div>
+        <div class="empty-state-title">${t('emptyPlanTitle')}</div>
+        <div class="empty-state-desc">${t('emptyPlanDesc')}</div>
       </div>
     `;
   }
@@ -413,9 +393,9 @@
   function getNoResultsHtml(query) {
     return `
       <div class="empty-state">
-        <div class="empty-icon">&#x1F50D;</div>
-        <div class="empty-title">${t('noResultsTitle', esc(query))}</div>
-        <div class="empty-desc">${t('noResultsDesc')}</div>
+        <div class="empty-state-icon">&#x1F50D;</div>
+        <div class="empty-state-title">${t('noResultsTitle', esc(query))}</div>
+        <div class="empty-state-desc">${t('noResultsDesc')}</div>
       </div>
     `;
   }
@@ -428,4 +408,3 @@
     renderPlanCard,
   };
 })(window);
-
