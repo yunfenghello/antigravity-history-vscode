@@ -1,10 +1,11 @@
 // @ts-nocheck
 /**
- * 前端批量操作管理与状态机调度器
+ * 前端批量操作管理与状态机调度器 (高度复用与统一抽象)
  *
  * 核心功能：
  * - 批量模式开启、退出与视觉切换
  * - 动态计数统计呈现 (已选择 N 项)
+ * - 统一已选集合调度 (getActiveSelectedSet)，消除双面板条件判断冗余
  * - 全选、反选、取消全选集合计算与卡片高亮联动
  * - 批量物理删除 IPC 调度
  *
@@ -14,6 +15,27 @@
 (function (window) {
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
   const { showToast } = window.AG_Utils;
+
+  /**
+   * 获取当前激活选项卡对应的选中 ID 集合 (Single Selection Target)
+   *
+   * @returns {Set<string>} 选中的 ID 集合
+   */
+  function getActiveSelectedSet() {
+    const state = window.AG_State;
+    return state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+  }
+
+  function renderView() {
+    const state = window.AG_State;
+    if (window.AG_Renderer) {
+      if (state.activeTab === 'conversations') {
+        window.AG_Renderer.renderList();
+      } else {
+        window.AG_Renderer.renderPlansList();
+      }
+    }
+  }
 
   function updateBatchBar() {
     const state = window.AG_State;
@@ -36,7 +58,7 @@
       toggleBatchBtn.textContent = t('batchModeBtn');
     }
 
-    const selectedSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    const selectedSet = getActiveSelectedSet();
     const count = selectedSet.size;
 
     if (batchSelectedCount) {
@@ -68,9 +90,7 @@
     }
 
     updateBatchBar();
-    if (window.AG_Renderer) {
-      window.AG_Renderer.renderList();
-    }
+    renderView();
   }
 
   function getVisibleItemIds() {
@@ -106,21 +126,17 @@
   }
 
   function handleSelectAll() {
-    const state = window.AG_State;
     const ids = getVisibleItemIds();
-    const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    const targetSet = getActiveSelectedSet();
     ids.forEach((id) => targetSet.add(id));
 
-    if (window.AG_Renderer) {
-      window.AG_Renderer.renderList();
-    }
+    renderView();
     updateBatchBar();
   }
 
   function handleInvertSelect() {
-    const state = window.AG_State;
     const ids = getVisibleItemIds();
-    const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    const targetSet = getActiveSelectedSet();
     ids.forEach((id) => {
       if (targetSet.has(id)) {
         targetSet.delete(id);
@@ -129,27 +145,22 @@
       }
     });
 
-    if (window.AG_Renderer) {
-      window.AG_Renderer.renderList();
-    }
+    renderView();
     updateBatchBar();
   }
 
   function handleDeselectAll() {
-    const state = window.AG_State;
-    const targetSet = state.activeTab === 'plans' ? state.selectedPlanIds : state.selectedConvIds;
+    const targetSet = getActiveSelectedSet();
     targetSet.clear();
 
-    if (window.AG_Renderer) {
-      window.AG_Renderer.renderList();
-    }
+    renderView();
     updateBatchBar();
   }
 
   function handleBatchDelete() {
     const state = window.AG_State;
     const isPlan = state.activeTab === 'plans';
-    const targetSet = isPlan ? state.selectedPlanIds : state.selectedConvIds;
+    const targetSet = getActiveSelectedSet();
     const ids = Array.from(targetSet);
 
     if (ids.length === 0) {
@@ -171,6 +182,7 @@
   }
 
   window.AG_Batch = {
+    getActiveSelectedSet,
     updateBatchBar,
     toggleBatchMode,
     getVisibleItemIds,
