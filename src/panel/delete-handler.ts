@@ -222,3 +222,4 @@ export async function handleBatchDeletePlans(
   vscode.window.showInformationMessage(msg);
   postMessage({ command: 'toast', text: msg });
 }
+

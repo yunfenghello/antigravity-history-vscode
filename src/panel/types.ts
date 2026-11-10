@@ -67,3 +67,4 @@ export type WebviewOutgoingMessage =
   | { command: 'optimisticDeleteConvs'; cascadeIds: string[] }
   | { command: 'optimisticDeletePlans'; planIds: string[] }
   | { command: 'error'; text: string };
+

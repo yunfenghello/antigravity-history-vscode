@@ -183,3 +183,4 @@
     handleBatchDelete,
   };
 })(window);
+

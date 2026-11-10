@@ -40,3 +40,4 @@
     clearSelections,
   };
 })(window);
+

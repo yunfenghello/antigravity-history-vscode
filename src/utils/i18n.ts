@@ -192,3 +192,4 @@ export function getCurrentLanguage(): Language {
   }
   return 'en';
 }
+

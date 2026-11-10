@@ -237,3 +237,4 @@ function syncExportConfiguration(postMessage: (msg: WebviewOutgoingMessage) => v
   postMessage({ command: 'setExportStrategy', strategy: exportStrategy });
   postMessage({ command: 'setSingleExportMode', mode: singleExportMode });
 }
+

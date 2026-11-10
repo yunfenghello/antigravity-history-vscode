@@ -274,3 +274,4 @@
     updateStaticTexts,
   };
 })(window);
+

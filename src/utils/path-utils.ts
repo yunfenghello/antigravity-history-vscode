@@ -127,3 +127,4 @@ export function resolveExportPath(configPath: string): string {
 export function getDefaultConversationsDir(): string {
   return path.join(os.homedir(), '.gemini', 'antigravity', 'conversations');
 }
+
