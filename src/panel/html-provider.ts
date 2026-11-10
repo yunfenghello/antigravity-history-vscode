@@ -32,6 +32,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
     'state.js',
     'render-cards.js',
     'batch-manager.js',
+    'view-controller.js',
     'main.js',
   ].map((name) =>
     webview.asWebviewUri(

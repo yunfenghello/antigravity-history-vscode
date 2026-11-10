@@ -1,13 +1,12 @@
 // @ts-nocheck
 /**
- * 前端应用程序主控制器与事件委托中枢
+ * 前端应用程序主控制器与事件委托中枢 (高度纯化与解耦)
  *
  * 核心功能：
- * - 初始化 VS Code API 桥接
+ * - 初始化 VS Code 原生 API 通信桥接 (AG_VSCODE)
  * - 全局事件委托 (Event Delegation) 监听列表点击，消除数千个冗余监听器
- * - 顶栏检索输入防抖、日期/工作区分组切换与选项卡视图切换
- * - 方案计划与对话历史双栏统一支持日期/工作区智能分组与折叠
- * - 处理宿主双向 IPC 消息通信 (setConversations, setPlans, optimisticDelete 等)
+ * - 全面委托通用视图控制器 (AG_ViewController) 调度刷新、展开/折叠、分组切换与搜索
+ * - 纯化处理宿主双向 IPC 消息通信 (setConversations, setPlans, optimisticDelete 等)
  *
  * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
@@ -17,232 +16,84 @@
   window.AG_VSCODE = vscode;
 
   const t = (k, ...args) => (window.AG_I18N ? window.AG_I18N.t(k, ...args) : k);
-  const { showToast, showLoading, showError } = window.AG_Utils;
+  const { showToast, showError } = window.AG_Utils;
   const state = window.AG_State;
 
+  /**
+   * 应用初始化总入口
+   */
   function init() {
     bindTopBarEvents();
     bindGlobalDelegatedEvents();
     bindIpcMessages();
     window.AG_I18N.updateStaticTexts();
-    showLoading();
-    vscode.postMessage({ command: 'refresh' });
+    window.AG_ViewController.handleRefresh();
   }
 
-  function renderCurrentView() {
-    if (state.activeTab === 'conversations') {
-      window.AG_Renderer.renderList();
-    } else {
-      window.AG_Renderer.renderPlansList();
-    }
-  }
-
+  /**
+   * 绑定顶栏所有按钮、输入框与下拉选择交互
+   */
   function bindTopBarEvents() {
-    const tabConversationsBtn = document.getElementById('tab-conversations');
-    const tabPlansBtn = document.getElementById('tab-plans');
-    const searchInput = document.getElementById('search-input');
-    const groupDateBtn = document.getElementById('group-date');
-    const groupWorkspaceBtn = document.getElementById('group-workspace');
-    const expandAllBtn = document.getElementById('btn-expand-all');
-    const collapseAllBtn = document.getElementById('btn-collapse-all');
-    const refreshBtn = document.getElementById('btn-refresh');
-    const toggleBatchBtn = document.getElementById('btn-toggle-batch');
-    const exportAllBtn = document.getElementById('btn-export-all');
-    const fieldLevelSelect = document.getElementById('field-level-select');
-    const exportStrategySelect = document.getElementById('export-strategy-select');
-    const singleExportModeSelect = document.getElementById('single-export-mode-select');
-    const langSelect = document.getElementById('lang-select');
-    const selectAllBtn = document.getElementById('btn-select-all');
-    const invertSelectBtn = document.getElementById('btn-invert-select');
-    const deselectAllBtn = document.getElementById('btn-deselect-all');
-    const batchDeleteBtn = document.getElementById('btn-batch-delete');
-    const exitBatchBtn = document.getElementById('btn-exit-batch');
+    const vc = window.AG_ViewController;
 
-    if (tabConversationsBtn) {
-      tabConversationsBtn.addEventListener('click', () => switchTab('conversations'));
-    }
-    if (tabPlansBtn) {
-      tabPlansBtn.addEventListener('click', () => switchTab('plans'));
-    }
+    // 选项卡切换
+    document.getElementById('tab-conversations')?.addEventListener('click', () => vc.switchTab('conversations'));
+    document.getElementById('tab-plans')?.addEventListener('click', () => vc.switchTab('plans'));
 
-    if (searchInput) {
-      let debounceTimer = null;
-      searchInput.addEventListener('input', (e) => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          state.searchQuery = e.target.value.trim().toLowerCase();
-          renderCurrentView();
-        }, 120);
-      });
-    }
+    // 统一搜索输入防抖
+    document.getElementById('search-input')?.addEventListener('input', (e) => vc.handleSearchInput(e.target.value));
 
-    if (groupDateBtn) {
-      groupDateBtn.addEventListener('click', () => {
-        state.groupBy = 'date';
-        groupDateBtn.classList.add('active');
-        if (groupWorkspaceBtn) {
-          groupWorkspaceBtn.classList.remove('active');
-        }
-        renderCurrentView();
-      });
-    }
+    // 统一分组模式切换 (日期 / 工作区)
+    document.getElementById('group-date')?.addEventListener('click', () => vc.setGroupBy('date'));
+    document.getElementById('group-workspace')?.addEventListener('click', () => vc.setGroupBy('workspace'));
 
-    if (groupWorkspaceBtn) {
-      groupWorkspaceBtn.addEventListener('click', () => {
-        state.groupBy = 'workspace';
-        groupWorkspaceBtn.classList.add('active');
-        if (groupDateBtn) {
-          groupDateBtn.classList.remove('active');
-        }
-        renderCurrentView();
-      });
-    }
+    // 统一全部展开与全部折叠
+    document.getElementById('btn-expand-all')?.addEventListener('click', () => vc.expandAll());
+    document.getElementById('btn-collapse-all')?.addEventListener('click', () => vc.collapseAll());
 
-    if (expandAllBtn) {
-      expandAllBtn.addEventListener('click', () => {
-        state.collapsedGroups.clear();
-        renderCurrentView();
-      });
-    }
+    // 统一刷新中枢触发
+    document.getElementById('btn-refresh')?.addEventListener('click', () => vc.handleRefresh());
 
-    if (collapseAllBtn) {
-      collapseAllBtn.addEventListener('click', () => {
-        const listContainer = document.getElementById('list-container');
-        if (listContainer) {
-          const allHeaders = listContainer.querySelectorAll('.date-group-header');
-          allHeaders.forEach((h) => {
-            const group = h.getAttribute('data-group');
-            if (group) {
-              state.collapsedGroups.add(group);
-            }
-          });
-          renderCurrentView();
-        }
-      });
-    }
+    // 批量模式切换
+    document.getElementById('btn-toggle-batch')?.addEventListener('click', () => window.AG_Batch?.toggleBatchMode());
 
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', () => {
-        refreshBtn.classList.add('spinning');
-        setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
-        vscode.postMessage({ command: 'refresh' });
-      });
-    }
+    // 对话导出与配置项
+    document.getElementById('btn-export-all')?.addEventListener('click', () => {
+      vscode.postMessage({ command: 'exportAll' });
+    });
 
-    if (toggleBatchBtn) {
-      toggleBatchBtn.addEventListener('click', () => {
-        window.AG_Batch.toggleBatchMode();
-      });
-    }
+    document.getElementById('field-level-select')?.addEventListener('change', (e) => {
+      vscode.postMessage({ command: 'setFieldLevel', value: e.target.value });
+    });
 
-    if (exportAllBtn) {
-      exportAllBtn.addEventListener('click', () => {
-        vscode.postMessage({ command: 'exportAll' });
-      });
-    }
+    document.getElementById('export-strategy-select')?.addEventListener('change', (e) => {
+      vscode.postMessage({ command: 'setExportStrategy', value: e.target.value });
+    });
 
-    if (fieldLevelSelect) {
-      fieldLevelSelect.addEventListener('change', (e) => {
-        vscode.postMessage({ command: 'setFieldLevel', value: e.target.value });
-      });
-    }
+    document.getElementById('single-export-mode-select')?.addEventListener('change', (e) => {
+      vscode.postMessage({ command: 'setSingleExportMode', value: e.target.value });
+    });
 
-    if (exportStrategySelect) {
-      exportStrategySelect.addEventListener('change', (e) => {
-        vscode.postMessage({ command: 'setExportStrategy', value: e.target.value });
-      });
-    }
+    document.getElementById('lang-select')?.addEventListener('change', (e) => {
+      const lang = e.target.value;
+      window.AG_I18N.setLanguage(lang);
+      vscode.postMessage({ command: 'setLanguage', value: lang });
+      vc.renderCurrentView();
+    });
 
-    if (singleExportModeSelect) {
-      singleExportModeSelect.addEventListener('change', (e) => {
-        vscode.postMessage({ command: 'setSingleExportMode', value: e.target.value });
-      });
-    }
-
-    if (langSelect) {
-      langSelect.addEventListener('change', (e) => {
-        const lang = e.target.value;
-        window.AG_I18N.setLanguage(lang);
-        vscode.postMessage({ command: 'setLanguage', value: lang });
-        renderCurrentView();
-      });
-    }
-
-    if (selectAllBtn) {
-      selectAllBtn.addEventListener('click', window.AG_Batch.handleSelectAll);
-    }
-    if (invertSelectBtn) {
-      invertSelectBtn.addEventListener('click', window.AG_Batch.handleInvertSelect);
-    }
-    if (deselectAllBtn) {
-      deselectAllBtn.addEventListener('click', window.AG_Batch.handleDeselectAll);
-    }
-    if (batchDeleteBtn) {
-      batchDeleteBtn.addEventListener('click', window.AG_Batch.handleBatchDelete);
-    }
-    if (exitBatchBtn) {
-      exitBatchBtn.addEventListener('click', () => window.AG_Batch.toggleBatchMode(false));
+    // 批量工具条动作按钮绑定
+    if (window.AG_Batch) {
+      document.getElementById('btn-select-all')?.addEventListener('click', window.AG_Batch.handleSelectAll);
+      document.getElementById('btn-invert-select')?.addEventListener('click', window.AG_Batch.handleInvertSelect);
+      document.getElementById('btn-deselect-all')?.addEventListener('click', window.AG_Batch.handleDeselectAll);
+      document.getElementById('btn-batch-delete')?.addEventListener('click', window.AG_Batch.handleBatchDelete);
+      document.getElementById('btn-exit-batch')?.addEventListener('click', () => window.AG_Batch.toggleBatchMode(false));
     }
   }
 
-  function switchTab(newTab) {
-    if (state.activeTab === newTab) {
-      return;
-    }
-    state.activeTab = newTab;
-
-    const tabConversationsBtn = document.getElementById('tab-conversations');
-    const tabPlansBtn = document.getElementById('tab-plans');
-    const searchInput = document.getElementById('search-input');
-    const exportAllBtn = document.getElementById('btn-export-all');
-    const fieldLevelSelect = document.getElementById('field-level-select');
-    const exportStrategySelect = document.getElementById('export-strategy-select');
-    const singleExportModeSelect = document.getElementById('single-export-mode-select');
-
-    if (newTab === 'conversations') {
-      tabConversationsBtn?.classList.add('active');
-      tabPlansBtn?.classList.remove('active');
-      if (searchInput) {
-        searchInput.placeholder = t('searchPlaceholderConv');
-      }
-      if (exportAllBtn) {
-        exportAllBtn.style.display = '';
-      }
-      if (fieldLevelSelect) {
-        fieldLevelSelect.style.display = '';
-      }
-      if (exportStrategySelect) {
-        exportStrategySelect.style.display = '';
-      }
-      if (singleExportModeSelect) {
-        singleExportModeSelect.style.display = '';
-      }
-    } else {
-      tabPlansBtn?.classList.add('active');
-      tabConversationsBtn?.classList.remove('active');
-      if (searchInput) {
-        searchInput.placeholder = t('searchPlaceholderPlan');
-      }
-      if (exportAllBtn) {
-        exportAllBtn.style.display = 'none';
-      }
-      if (fieldLevelSelect) {
-        fieldLevelSelect.style.display = 'none';
-      }
-      if (exportStrategySelect) {
-        exportStrategySelect.style.display = 'none';
-      }
-      if (singleExportModeSelect) {
-        singleExportModeSelect.style.display = 'none';
-      }
-    }
-
-    state.selectedConvIds.clear();
-    state.selectedPlanIds.clear();
-    window.AG_Batch.updateBatchBar();
-    renderCurrentView();
-  }
-
+  /**
+   * 列表容器全局事件委托代理
+   */
   function bindGlobalDelegatedEvents() {
     const listContainer = document.getElementById('list-container');
     if (!listContainer) {
@@ -250,140 +101,144 @@
     }
 
     listContainer.addEventListener('click', (e) => {
-      // 1. 处理分组展开/折叠
+      // 1. 处理分组展开与折叠委托（委托给公共视图控制器）
       const header = e.target.closest('.date-group-header');
       if (header) {
         const group = header.getAttribute('data-group');
-        if (group) {
-          if (state.collapsedGroups.has(group)) {
-            state.collapsedGroups.delete(group);
-          } else {
-            state.collapsedGroups.add(group);
-          }
-          renderCurrentView();
-        }
+        window.AG_ViewController.toggleGroup(group);
         return;
       }
 
-      // 2. 处理动作按钮点击
+      // 2. 处理卡片动作按钮点击
       const actionBtn = e.target.closest('[data-action]');
       if (actionBtn) {
         e.stopPropagation();
-        const action = actionBtn.getAttribute('data-action');
-        const cascadeId = actionBtn.getAttribute('data-id');
-        const planId = actionBtn.getAttribute('data-plan-id');
-
-        if (action === 'refresh') {
-          showLoading();
-          vscode.postMessage({ command: 'refresh' });
-          vscode.postMessage({ command: 'refreshPlans' });
-        } else if (action === 'exportMd') {
-          vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
-          showToast(t('preparingExportMd'));
-        } else if (action === 'exportJson') {
-          vscode.postMessage({ command: 'export', cascadeId, format: 'json' });
-          showToast(t('preparingExportJson'));
-        } else if (action === 'copyId') {
-          vscode.postMessage({ command: 'copyId', cascadeId: cascadeId || planId });
-          showToast(t('idCopied'));
-        } else if (action === 'openFolder') {
-          const folderPath = actionBtn.getAttribute('data-path');
-          if (folderPath) {
-            vscode.postMessage({ command: 'openInExplorer', path: folderPath });
-          }
-        } else if (action === 'exportPlanSingle') {
-          const fileName = actionBtn.getAttribute('data-file-name') || 'implementation_plan.md';
-          vscode.postMessage({ command: 'exportPlanSingle', planId, fileName });
-        } else if (action === 'exportPlanAll') {
-          vscode.postMessage({ command: 'exportPlanAll', planId });
-        } else if (action === 'openPlanFolder') {
-          const folderPath = actionBtn.getAttribute('data-path');
-          if (folderPath) {
-            vscode.postMessage({ command: 'openInExplorer', path: folderPath });
-          }
-        } else if (action === 'deleteConv') {
-          if (cascadeId) {
-            vscode.postMessage({ command: 'deleteConversation', cascadeId });
-          }
-        } else if (action === 'deletePlan') {
-          if (planId) {
-            vscode.postMessage({ command: 'deletePlan', planId });
-          }
-        }
+        handleCardAction(actionBtn);
         return;
       }
 
       // 3. 处理批量模式下的卡片勾选或整行点击切换
       if (state.isBatchMode) {
-        const card = e.target.closest('.conv-card');
-        if (card) {
-          const checkbox = e.target.closest('.conv-checkbox');
-          const cid = card.getAttribute('data-cascade-id');
-          const pid = card.getAttribute('data-plan-id');
-
-          if (state.activeTab === 'conversations' && cid) {
-            if (checkbox) {
-              if (checkbox.checked) {
-                state.selectedConvIds.add(cid);
-                card.classList.add('selected');
-              } else {
-                state.selectedConvIds.delete(cid);
-                card.classList.remove('selected');
-              }
-            } else {
-              const cb = card.querySelector('.conv-checkbox');
-              if (state.selectedConvIds.has(cid)) {
-                state.selectedConvIds.delete(cid);
-                card.classList.remove('selected');
-                if (cb) {
-                  cb.checked = false;
-                }
-              } else {
-                state.selectedConvIds.add(cid);
-                card.classList.add('selected');
-                if (cb) {
-                  cb.checked = true;
-                }
-              }
-            }
-            window.AG_Batch.updateBatchBar();
-            return;
-          } else if (state.activeTab === 'plans' && pid) {
-            if (checkbox) {
-              if (checkbox.checked) {
-                state.selectedPlanIds.add(pid);
-                card.classList.add('selected');
-              } else {
-                state.selectedPlanIds.delete(pid);
-                card.classList.remove('selected');
-              }
-            } else {
-              const cb = card.querySelector('.conv-checkbox');
-              if (state.selectedPlanIds.has(pid)) {
-                state.selectedPlanIds.delete(pid);
-                card.classList.remove('selected');
-                if (cb) {
-                  cb.checked = false;
-                }
-              } else {
-                state.selectedPlanIds.add(pid);
-                card.classList.add('selected');
-                if (cb) {
-                  cb.checked = true;
-                }
-              }
-            }
-            window.AG_Batch.updateBatchBar();
-            return;
-          }
-        }
+        handleBatchSelectionClick(e);
       }
     });
   }
 
+  /**
+   * 分发卡片具体功能动作
+   *
+   * @param {HTMLElement} btn 触发动作的按钮节点
+   */
+  function handleCardAction(btn) {
+    const action = btn.getAttribute('data-action');
+    const cascadeId = btn.getAttribute('data-id');
+    const planId = btn.getAttribute('data-plan-id');
+
+    switch (action) {
+      case 'refresh':
+        window.AG_ViewController.handleRefresh();
+        break;
+      case 'exportMd':
+        vscode.postMessage({ command: 'export', cascadeId, format: 'md' });
+        showToast(t('preparingExportMd'));
+        break;
+      case 'exportJson':
+        vscode.postMessage({ command: 'export', cascadeId, format: 'json' });
+        showToast(t('preparingExportJson'));
+        break;
+      case 'copyId':
+        vscode.postMessage({ command: 'copyId', cascadeId: cascadeId || planId });
+        showToast(t('idCopied'));
+        break;
+      case 'openFolder':
+      case 'openPlanFolder': {
+        const folderPath = btn.getAttribute('data-path');
+        if (folderPath) {
+          vscode.postMessage({ command: 'openInExplorer', path: folderPath });
+        }
+        break;
+      }
+      case 'exportPlanSingle': {
+        const fileName = btn.getAttribute('data-file-name') || 'implementation_plan.md';
+        vscode.postMessage({ command: 'exportPlanSingle', planId, fileName });
+        break;
+      }
+      case 'exportPlanAll':
+        vscode.postMessage({ command: 'exportPlanAll', planId });
+        break;
+      case 'deleteConv':
+        if (cascadeId) {
+          vscode.postMessage({ command: 'deleteConversation', cascadeId });
+        }
+        break;
+      case 'deletePlan':
+        if (planId) {
+          vscode.postMessage({ command: 'deletePlan', planId });
+        }
+        break;
+    }
+  }
+
+  /**
+   * 处理批量选择模式下的行点击与复选框勾选事件
+   *
+   * @param {MouseEvent} e 点击事件对象
+   */
+  function handleBatchSelectionClick(e) {
+    const card = e.target.closest('.conv-card');
+    if (!card) {
+      return;
+    }
+
+    const checkbox = e.target.closest('.conv-checkbox');
+    const cid = card.getAttribute('data-cascade-id');
+    const pid = card.getAttribute('data-plan-id');
+    const isConv = state.activeTab === 'conversations' && cid;
+    const isPlan = state.activeTab === 'plans' && pid;
+
+    if (!isConv && !isPlan) {
+      return;
+    }
+
+    const targetSet = isConv ? state.selectedConvIds : state.selectedPlanIds;
+    const targetId = isConv ? cid : pid;
+
+    if (checkbox) {
+      if (checkbox.checked) {
+        targetSet.add(targetId);
+        card.classList.add('selected');
+      } else {
+        targetSet.delete(targetId);
+        card.classList.remove('selected');
+      }
+    } else {
+      const cb = card.querySelector('.conv-checkbox');
+      if (targetSet.has(targetId)) {
+        targetSet.delete(targetId);
+        card.classList.remove('selected');
+        if (cb) {
+          cb.checked = false;
+        }
+      } else {
+        targetSet.add(targetId);
+        card.classList.add('selected');
+        if (cb) {
+          cb.checked = true;
+        }
+      }
+    }
+
+    window.AG_Batch?.updateBatchBar();
+  }
+
+  /**
+   * 监听 VS Code 宿主下发的双向 IPC 消息
+   */
   function bindIpcMessages() {
     window.addEventListener('message', (event) => {
       const msg = event.data;
+      const vc = window.AG_ViewController;
+
       switch (msg.command) {
         case 'setConversations': {
           state.conversations = msg.data || {};
@@ -395,9 +250,9 @@
               state.selectedConvIds.delete(cid);
             }
           }
-          window.AG_Batch.updateBatchBar();
+          window.AG_Batch?.updateBatchBar();
           if (state.activeTab === 'conversations') {
-            window.AG_Renderer.renderList();
+            vc.renderCurrentView();
           }
           break;
         }
@@ -408,15 +263,15 @@
               state.selectedPlanIds.delete(pid);
             }
           }
-          window.AG_Batch.updateBatchBar();
+          window.AG_Batch?.updateBatchBar();
           if (state.activeTab === 'plans') {
-            window.AG_Renderer.renderPlansList();
+            vc.renderCurrentView();
           }
           break;
         }
         case 'setExportPath': {
           state.exportPath = msg.path || '';
-          window.AG_Renderer.renderExportPathBar();
+          window.AG_Renderer?.renderExportPathBar();
           break;
         }
         case 'setExportStrategy': {
@@ -436,7 +291,7 @@
         case 'setLanguage': {
           if (msg.language && (msg.language === 'zh-CN' || msg.language === 'en')) {
             window.AG_I18N.setLanguage(msg.language);
-            renderCurrentView();
+            vc.renderCurrentView();
           }
           break;
         }
@@ -457,9 +312,9 @@
               delete state.conversations[cid];
               state.selectedConvIds.delete(cid);
             }
-            window.AG_Batch.updateBatchBar();
+            window.AG_Batch?.updateBatchBar();
             if (state.activeTab === 'conversations') {
-              window.AG_Renderer.renderList();
+              vc.renderCurrentView();
             }
           }
           break;
@@ -471,9 +326,9 @@
             for (const pid of msg.planIds) {
               state.selectedPlanIds.delete(pid);
             }
-            window.AG_Batch.updateBatchBar();
+            window.AG_Batch?.updateBatchBar();
             if (state.activeTab === 'plans') {
-              window.AG_Renderer.renderPlansList();
+              vc.renderCurrentView();
             }
           }
           break;

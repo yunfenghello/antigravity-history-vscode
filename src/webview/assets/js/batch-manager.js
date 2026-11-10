@@ -27,6 +27,10 @@
   }
 
   function renderView() {
+    if (window.AG_ViewController && typeof window.AG_ViewController.renderCurrentView === 'function') {
+      window.AG_ViewController.renderCurrentView();
+      return;
+    }
     const state = window.AG_State;
     if (window.AG_Renderer) {
       if (state.activeTab === 'conversations') {

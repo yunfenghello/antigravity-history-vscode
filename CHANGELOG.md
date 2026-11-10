@@ -5,13 +5,19 @@ All notable changes to the "Antigravity History" extension will be documented in
 ## [0.3.5] - 2026-11-10
 
 ### Refactored & Code Reuse (DRY)
+- **双面板公共控制层深度解耦与通用视图控制器抽离**：
+  - 新建独立公共视图控制器模块 `src/webview/assets/js/view-controller.js`，抽离全局单例 `window.AG_ViewController`。
+  - 统一刷新中枢机制 (`handleRefresh`)：收敛按钮旋转动画、`Loading` 遮罩与单通道 IPC 发送，前后端统一由单点 `refresh` 指令并行并发完成会话对齐与计划扫描，消除链路分化与多余消息。
+  - 统一展开与折叠调度 (`expandAll`、`collapseAll`、`toggleGroup`)：集中管理 `collapsedGroups` 状态机，无论在对话历史还是方案计划下，均可无缝执行单项分组展开/收缩与全局一键展开/折叠。
+  - 统一分组模式切换 (`setGroupBy`) 与搜索输入防抖处理 (`handleSearchInput`)：规范化维护日期/工作区按钮高亮类名，120ms 防抖更新搜索词并触发视图重绘。
+  - 统一激活视图路由分发 (`renderCurrentView`) 与面板切换 (`switchTab`)，将双面板业务渲染器转为纯粹的无状态“视图插件”。
+- **主控制器 `main.js` 纯化与瘦身**：
+  - 移除所有杂糅的折叠算法、模式判断与动画定时器，`main.js` 纯粹只保留 VS Code 原生 IPC 消息路由器与全局 DOM 事件监听代理，代码量压缩 40% 以上，结构清晰高内聚。
 - **双面板公共分组与渲染引擎高度抽象与深度复用**：
-  - 抽离通用泛型日期分组算法 groupItemsByDate 与工作区分组算法 groupItemsByWorkspace，对话历史与方案计划 100% 复用统一的数据聚合逻辑。
-  - 抽离通用分组折叠容器渲染器 renderGroupedContainer，统一外层分组骨架、动态折叠箭头、标签与条目计数徽章渲染，消除双面板重复拼装代码。
-  - 抽象公共卡片组件片段构建器 (buildCheckboxHtml, getStatusDot, buildEmptyStateHtml)，降低 DOM 构建开销，render-cards.js 体积大幅精简。
-  - 统一批量选择调度器 getActiveSelectedSet，双选项卡多选状态机无缝对齐单一数据源。
-- **全链路流式刷新机制归一化**：
-  - 统一前后端刷新调度中枢，单次触发即刻并行完成本地会话对齐、方案工件扫描与后台语言服务静默富化，消除刷新链路分化。
+  - 抽离通用泛型日期分组算法 `groupItemsByDate` 与工作区分组算法 `groupItemsByWorkspace`，对话历史与方案计划 100% 复用统一的数据聚合逻辑。
+  - 抽离通用分组折叠容器渲染器 `renderGroupedContainer`，统一外层分组骨架、动态折叠箭头、标签与条目计数徽章渲染，消除双面板重复拼装代码。
+  - 抽象公共卡片组件片段构建器 (`buildCheckboxHtml`, `getStatusDot`, `buildEmptyStateHtml`)，降低 DOM 构建开销，`render-cards.js` 体积大幅精简。
+  - 统一批量选择调度器 `getActiveSelectedSet`，双选项卡多选状态机无缝对齐单一数据源。
 
 ## [0.3.4] - 2026-11-10
 
