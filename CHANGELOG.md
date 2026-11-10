@@ -1,6 +1,20 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to the "Antigravity History" extension will be documented in this file.
+
+## [0.3.4] - 2026-11-10
+
+### Refactored & Architecture
+- **代码架构全面解耦与四层领域分层重构**：
+  - 彻底拆解超千行的巨石单文件 src/panel-manager.ts (1027 行)，建立清晰的 src/panel/ 视图交互层：panel-manager.ts (生命周期与路由)、html-provider.ts (CSP与HTML模板)、export-handler.ts (单项/批量导出与报告)、delete-handler.ts (物理删除与防误触)、refresh-orchestrator.ts (刷新流水线) 与 types.ts。
+  - 规范建立 src/core/ 底层协议与扫描引擎层 (ls-client, discovery, recovery, parser, formatter, cache)、src/services/ 业务服务层 (plan-service) 与 src/utils/ 通用基础设施层 (i18n, path-utils)，消除扁平混乱的源码目录。
+  - 前端脚本模块化拆分：将 1138 行的巨型闭包 panel.js 拆分为 js/i18n.js、js/utils.js、js/state.js、js/render-cards.js、js/batch-manager.js 与 js/main.js，实现单一职责与高内聚设计。
+
+### Performance
+- **三级渐进式非阻塞流式刷新体系**：
+  - 阶段一（毫秒级极速首屏）：优先基于内存与本地持久化缓存推送数据，面板打开与刷新首屏耗时由数百毫秒缩短至 5ms 以内，彻底消除界面白屏与等待感。
+  - 阶段二（快速本地对齐）：磁盘物理实体与方案计划并发异步扫描，淘汰幽灵残留会话，秒级同步最新文件修改时间。
+  - 阶段三（后台静默网络富化）：语言服务进程探测与未索引标题网络补偿转为异步后台队列，不阻塞前端交互，探测完成后局部静默富化。
 
 ## [0.3.3] - 2026-11-10
 

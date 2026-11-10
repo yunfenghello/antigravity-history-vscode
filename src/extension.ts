@@ -6,12 +6,12 @@
  * - 创建右下角状态栏快速入口按钮
  * - 响应扩展激活与反激活生命周期
  *
- * 作者/更新时间: fengyun / 2026-08-17
+ * 作者/更新时间: Antigravity Coding Assistant / 2026-11-10
  */
 
 import * as vscode from 'vscode';
-import { openPanel, refreshPanel } from './panel-manager.js';
-import { t } from './i18n.js';
+import { openPanel, refreshPanel } from './panel/panel-manager.js';
+import { t } from './utils/i18n.js';
 
 export function activate(context: vscode.ExtensionContext): void {
   // ── 状态栏常驻按钮 ──

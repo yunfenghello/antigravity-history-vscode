@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Antigravity History 扩展离线标准化 VSIX 打包脚本
 .DESCRIPTION
